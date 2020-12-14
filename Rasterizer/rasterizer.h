@@ -23,6 +23,8 @@ protected:
 
 	Model model;
 
+	glm::vec3 light_dir;
+
 	TGAColor* framebuffer;
 };
 

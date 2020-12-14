@@ -10,7 +10,7 @@ int main(int argc, char** argv) {
 	time_t start, end;
 	start = time(NULL);
 	TGAImage image(100, 100, TGAImage::RGB);
-	image.set(52, 41, red);
+	image.set(52, 41, white);
 	image.flip_vertically(); // i want to have the origin at the left bottom corner of the image
 	image.write_tga_file("output.tga");
 	end = time(NULL);

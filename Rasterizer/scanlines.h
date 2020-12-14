@@ -1,15 +1,17 @@
 #pragma once
 #include <glm/glm.hpp>
+#include "tgaimage.h"
 
 struct PolygonEntry {
-	glm::vec4 plane;
+	glm::vec3 plane;
 	int faceID;
 	int dy;
-	glm::vec3 color;
+	TGAColor color;
 };
 
 struct EdgeEntry {
 	float x_at_ymax;
+	float z_at_ymax;
 	float dx;
 	int faceID;
 	int dy;
