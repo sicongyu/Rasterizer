@@ -41,9 +41,9 @@ public:
 	void draw();
 
 private:
-	std::unordered_map<int, PolygonEntry> * polygon_table;
+	std::vector<std::unordered_map<int, PolygonEntry>> polygon_table;
 	// an polygon could have multiple edges indexed by the same ID
-	std::unordered_multimap<int, EdgeEntry> * edge_table;
+	std::vector<std::unordered_multimap<int, EdgeEntry>> edge_table;
 	std::unordered_map<int, PolygonEntry> active_polygon_table;
 	std::unordered_map<int, ActiveEdgeEntry> active_edge_table;
 	//std::vector<PolygonEntry> * polygon_table;

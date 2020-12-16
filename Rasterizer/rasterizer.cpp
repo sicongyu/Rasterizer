@@ -18,15 +18,15 @@ ScanLine::ScanLine(int width, int height, const char* path) :
 	Rasterizer(width, height, path) {
 	//polygon_table = new std::vector<PolygonEntry>[height];
 	//edge_table = new std::vector<EdgeEntry>[height];
-	polygon_table = new std::unordered_map<int, PolygonEntry>[height];
-	edge_table = new std::unordered_multimap<int, EdgeEntry>[height];
+	polygon_table = std::vector<std::unordered_map<int, PolygonEntry>>(height);
+	edge_table = std::vector<std::unordered_multimap<int, EdgeEntry>>(height);
 	z_buffer = new float[height * width];
 	memset(z_buffer, -INFINITY, sizeof(float) * width * height);
 }
 
 ScanLine::~ScanLine() {
-	delete[] polygon_table;
-	delete[] edge_table;
+	//delete[] polygon_table;
+	//delete[] edge_table;
 }
 
 void ScanLine::draw() {
@@ -41,7 +41,7 @@ void ScanLine::draw() {
 		float y_min = INFINITY;
 		for (int j = 0; j < 3; j++) {
 			// convert into screen space
-			glm::vec3 vtx = (model.vertices[3 * i + j] - model.min) / (model.max - model.min);
+			glm::vec3 vtx = (model.vertices[3 * i + j] - model.min) / (1.5f * (model.max - model.min));
 			vtx.x *= width;
 			vtx.y *= height;
 
@@ -49,13 +49,22 @@ void ScanLine::draw() {
 				y_max = vtx.y;
 				y_map[0] = j;
 			}
-			else if (vtx.y < y_min) {
+			if (vtx.y < y_min) {
 				y_min = vtx.y;
 				y_map[2] = j;
 			}
 			vertices[j] = vtx;
 		}
+
+		// Occasionally when three vertices share the same y value, i.e., in the xoz plane
+		if (y_map[0] == y_map[2]) {
+			// assign an oreder manually
+			y_map[2] = 2;
+		}
 		y_map[1] = 3 - y_map[0] - y_map[2];
+		if (!(y_map[1] >= 0 && y_map[1] <= 2)) {
+			throw "Error: invalid y_map index";
+		}
 
 		// put entry into polygon_table
 		glm::vec3 n = model.normals[i];
@@ -89,7 +98,7 @@ void ScanLine::draw() {
 	}
 
 	// scan process: from top to bottom
-	for (int y = height; y >= 0; y--) {
+	for (int y = height-1; y >= 0; y--) {
 		// add new active polygons and edges
 		if (!polygon_table[y].empty()) {
 			for (auto polygon_table_iter : polygon_table[y]) {
@@ -102,7 +111,9 @@ void ScanLine::draw() {
 				// serach for corresponding edges of the polygon: there must to be at least two edges, and we do not consider the three-edge case
 				std::vector<EdgeEntry> edges;
 				auto cnt = edge_table[y].count(faceID);
-				assert(cnt == 2);
+				if (!(cnt == 2 || cnt == 3)) {
+					throw "Invalid number of edges with the same ID in a single scan";
+				}
 				auto edge = edge_table[y].find(faceID);
 				for (;cnt > 0; cnt--, edge++) {
 					edges.push_back(edge->second);
