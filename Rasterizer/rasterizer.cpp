@@ -21,7 +21,7 @@ ScanLine::ScanLine(int width, int height, const char* path) :
 	polygon_table = std::vector<std::unordered_map<int, PolygonEntry>>(height);
 	edge_table = std::vector<std::unordered_multimap<int, EdgeEntry>>(height);
 	z_buffer = new float[height * width];
-	memset(z_buffer, -INFINITY, sizeof(float) * width * height);
+	memset(z_buffer, INFINITY, sizeof(float) * width * height);
 }
 
 ScanLine::~ScanLine() {
@@ -72,7 +72,7 @@ void ScanLine::draw() {
 		PolygonEntry polygon_entry = { 
 			model.normals[i], 
 			i, 
-			(int)y_max - (int)y_min + 1,
+			(int)y_max - (int)y_min + 2,
 			white * intensity
 		};
 		//polygon_table[int(y_max)].push_back(polygon_entry);
@@ -144,6 +144,7 @@ void ScanLine::draw() {
 					edges[1].x_at_ymax, edges[1].dx, edges[1].dy,
 					edges[0].z_at_ymax, -polygon.plane.x / c, polygon.plane.y / c 
 				};
+				active_edge_table.emplace(faceID, active_edge_entry);
 				//active_edge_table.push_back(active_edge_entry);
 			}
 		}
@@ -159,7 +160,7 @@ void ScanLine::draw() {
 			for (int x = active_edge.xl; x < active_edge.xr; x++) {
 				// update buffer contents
 				float z = active_edge.zl + x * active_edge.dzx;
-				if (z > z_buffer[y * width + x]) {
+				if (z < z_buffer[y * width + x]) {
 					z_buffer[y * width + x] = z;
 					framebuffer->set(x, y, active_polygon_table[active_edge.faceID].color);
 				}
@@ -171,7 +172,9 @@ void ScanLine::draw() {
 			auto& polygon_dy = --active_polygon_table[active_edge.faceID].dy;
 
 			if (active_edge.dyl == 0 && active_edge.dyr == 0) {
-				assert(polygon_dy == 0);
+				if (polygon_dy != 0) {
+					throw "Error: Unfinished Polygon Rasterization";
+				}
 				active_polygon_table.erase(active_edge.faceID);
 				active_edge_table.erase(active_edge.faceID);
 				continue;
