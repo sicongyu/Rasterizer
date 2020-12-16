@@ -10,7 +10,10 @@
 Model::Model() {}
 
 Model::Model(const char* path) {
-	loadOBJ(path, vertices, uvs, normals, max, min);
+	if (!loadOBJ(path, vertices, uvs, normals, max, min)) {
+		throw "Model: load obj failed";
+	}
+	num_faces = (unsigned int)vertices.size() / 3;
 }
 
 bool Model::loadOBJ(
@@ -130,7 +133,6 @@ bool Model::loadOBJ(
 		out_vertices.push_back(vertex);
 		out_uvs     .push_back(uv);
 		out_normals .push_back(normal);
-	
 	}
 
 	return true;

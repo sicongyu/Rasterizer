@@ -4,6 +4,7 @@
 #include "scanlines.h"
 #include "tgaimage.h"
 #include <vector>
+#include <unordered_map>
 
 class Rasterizer{
 
@@ -15,6 +16,8 @@ public:
 
 	virtual void draw() = 0;
 
+	TGAImage* getFramebuffer() { return framebuffer; }
+
 protected:
 
 	int width;
@@ -25,7 +28,7 @@ protected:
 
 	glm::vec3 light_dir;
 
-	TGAColor* framebuffer;
+	TGAImage* framebuffer;
 };
 
 class ScanLine: public Rasterizer{
@@ -38,10 +41,15 @@ public:
 	void draw();
 
 private:
-	std::vector<PolygonEntry> * polygon_table;
-	std::vector<EdgeEntry> * edge_table;
-	std::vector<PolygonEntry> active_polygon_table;
-	std::vector<ActiveEdgeEntry> active_edge_table;
+	std::unordered_map<int, PolygonEntry> * polygon_table;
+	// an polygon could have multiple edges indexed by the same ID
+	std::unordered_multimap<int, EdgeEntry> * edge_table;
+	std::unordered_map<int, PolygonEntry> active_polygon_table;
+	std::unordered_map<int, ActiveEdgeEntry> active_edge_table;
+	//std::vector<PolygonEntry> * polygon_table;
+	//std::vector<EdgeEntry> * edge_table;
+	//std::vector<PolygonEntry> active_polygon_table;
+	//std::vector<ActiveEdgeEntry> active_edge_table;
 	float* z_buffer;
 	
 };

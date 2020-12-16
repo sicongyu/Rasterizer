@@ -4,15 +4,20 @@
 #include <iostream>
 #include <time.h>
 #include "tgaimage.h"
+#include "rasterizer.h"
 #include <glm/glm.hpp>
 
 int main(int argc, char** argv) {
 	time_t start, end;
 	start = time(NULL);
-	TGAImage image(100, 100, TGAImage::RGB);
-	image.set(52, 41, white);
-	image.flip_vertically(); // i want to have the origin at the left bottom corner of the image
-	image.write_tga_file("output.tga");
+
+	int width = 800;
+	int height = 600;
+	Rasterizer* rasterizer = new ScanLine(width, height, "m1911.obj");
+	rasterizer->draw();
+	rasterizer->getFramebuffer()->flip_vertically();// i want to have the origin at the left bottom corner of the image
+	rasterizer->getFramebuffer()->write_tga_file("output.tga");
+
 	end = time(NULL);
 	printf("Time Elapsed: %ld", end - start);
 	//std::cout << "Time elapesd: " << (end - start) << std::endl;

@@ -27,5 +27,5 @@ struct ActiveEdgeEntry {
 	float zl;
 	float dzx;
 	float dzy;
-	int id;
+	int faceID;
 };

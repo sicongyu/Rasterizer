@@ -16,7 +16,7 @@ public:
 	std::vector<glm::vec3> normals;
 	glm::vec3 max;
 	glm::vec3 min;
-	int num_faces;
+	unsigned int num_faces;
 
 	Model();
 	Model(const char* path);

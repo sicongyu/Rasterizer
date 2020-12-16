@@ -20,8 +20,6 @@ struct TGA_Header {
 };
 #pragma pack(pop)
 
-const TGAColor white = TGAColor(255, 255, 255, 255);
-
 struct TGAColor {
 	union {
 		struct {
