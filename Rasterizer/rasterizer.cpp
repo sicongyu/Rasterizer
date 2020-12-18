@@ -72,7 +72,7 @@ void ScanLine::draw() {
 		PolygonEntry polygon_entry = { 
 			model.normals[i], 
 			i, 
-			(int)y_max - (int)y_min + 2,
+			(int)y_max - (int)y_min + 1,
 			white * intensity
 		};
 		//polygon_table[int(y_max)].push_back(polygon_entry);
@@ -88,8 +88,8 @@ void ScanLine::draw() {
 					vtx0.x, //x of upper vertex
 					vtx0.z, // z of upper vertex
 					-(edge.x / edge.y), // dx (edge.y is negative)
-					i,
-					(int)vtx0.y - (int)vtx0.y + 1
+					i, // faceID
+					(int)vtx0.y - (int)vtx1.y + 1 // dy, notice that the height of vtx0 must be greater than vtx1
 				};
 				//edge_table[int(vtx0.y)].push_back(edge_entry);
 				edge_table[int(vtx0.y)].emplace(edge_entry.faceID, edge_entry);
@@ -100,6 +100,9 @@ void ScanLine::draw() {
 	// scan process: from top to bottom
 	for (int y = height-1; y >= 0; y--) {
 		// add new active polygons and edges
+		if (y == 400) {
+			int err = 0;
+		}
 		if (!polygon_table[y].empty()) {
 			for (auto polygon_table_iter : polygon_table[y]) {
 				int faceID = polygon_table_iter.first;
@@ -142,19 +145,20 @@ void ScanLine::draw() {
 				ActiveEdgeEntry active_edge_entry = {
 					edges[0].x_at_ymax, edges[0].dx, edges[0].dy,
 					edges[1].x_at_ymax, edges[1].dx, edges[1].dy,
-					edges[0].z_at_ymax, -polygon.plane.x / c, polygon.plane.y / c 
+					edges[0].z_at_ymax, -polygon.plane.x / c, polygon.plane.y / c,
+					faceID
 				};
 				active_edge_table.emplace(faceID, active_edge_entry);
 				//active_edge_table.push_back(active_edge_entry);
 			}
 		}
 
-		for (auto active_edge_pair: active_edge_table) {
+		for (auto active_edge_pair_iter = active_edge_table.begin(); active_edge_pair_iter != active_edge_table.end(); ++active_edge_pair_iter) {
 			/*--- consider this case will not happen anymore ---*/
 			//if (active_edge->second.dyl == 0 && active_edge->second.dyr == 0) {
 			//	active_edge_table.erase(active_edge);
 			//}
-			auto active_edge = active_edge_pair.second;
+			auto active_edge = active_edge_pair_iter->second;
 
 			// update pixels from left to right
 			for (int x = active_edge.xl; x < active_edge.xr; x++) {
@@ -169,7 +173,7 @@ void ScanLine::draw() {
 			// update active edge
 			active_edge.dyl--;
 			active_edge.dyr--;
-			auto& polygon_dy = --active_polygon_table[active_edge.faceID].dy;
+			auto polygon_dy = --active_polygon_table[active_edge.faceID].dy;
 
 			if (active_edge.dyl == 0 && active_edge.dyr == 0) {
 				if (polygon_dy != 0) {
