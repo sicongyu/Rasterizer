@@ -9,7 +9,7 @@ Rasterizer::Rasterizer(int width, int height, const char* path) :
 	//framebuffer = new TGAColor[width * height];
 	//memset(framebuffer, 0, sizeof(TGAColor) * width * height);
 	framebuffer = new TGAImage(width, height, TGAImage::RGB);
-	light_dir = glm::vec3(0.0f, 0.0f, 1.0f);
+	light_dir = glm::vec3(0.0f, 0.0f, -1.0f);
 }
 
 Rasterizer::~Rasterizer() {
@@ -44,7 +44,7 @@ void ScanLine::draw() {
 		float y_max = -FLT_MAX;
 		float y_min = FLT_MAX;
 		glm::vec2 abs_max = glm::vec2(box_max(abs(model.max.x), abs(model.min.x)), box_max(abs(model.max.y), abs(model.min.y)));
-		glm::vec3 normal;
+		glm::vec3 world_normal = model.normals[3 * i]; // every three vtxs share the same normal;
 		for (int j = 0; j < 3; j++) {
 			// convert into screen space
 			//glm::vec3 vtx = (model.vertices[3 * i + j] - model.min) / (1.5f * (model.max - model.min));
@@ -63,7 +63,6 @@ void ScanLine::draw() {
 				y_map[2] = j;
 			}
 			vertices[j] = vtx;
-			normal = model.normals[3 * i]; // every three vtxs share the same normal
 		}
 
 		int polygon_dy = (int)y_max - (int)y_min + 1;
@@ -81,32 +80,23 @@ void ScanLine::draw() {
 			throw "Error: invalid y_map index";
 		}
 
-		// put entry into polygon_table
-		float intensity = glm::dot(normal, light_dir);
-		PolygonEntry polygon_entry = {
-			normal,
-			i,
-			polygon_dy,
-			//white * intensity,
-			//white, // debug purpose
-			TGAColor(i * (255.0 / model.num_faces), 0, 0, 255)
-			//TGAColor(255 * normal.x, 255 * normal.y, 255 * normal.z, 255)
-		};
-		//polygon_table[int(y_max)].push_back(polygon_entry);
-		polygon_table[int(y_max)].emplace(polygon_entry.faceID, polygon_entry);
+		float intensity = box_max(glm::dot(-world_normal, light_dir), 0.0f);
 
+		glm::vec3 edges[3];
 		// combination of (0, 1), (0, 2), (1, 2), put entries into edge_table
 		for (int m = 0; m < 2; m++) {
 			for (int n = m + 1; n < 3; n++) {
 				glm::vec3 vtx0 = vertices[y_map[m]];
 				glm::vec3 vtx1 = vertices[y_map[n]];
 
+				glm::vec3 edge = vtx1 - vtx0;
+				edges[m + n - 1] = edge;
+
 				int edge_dy = (int)vtx0.y - (int)vtx1.y + 1;
 				if (edge_dy == 1) {
 					continue; // discard edges that covers only one row
 				}
 
-				glm::vec3 edge = vtx1 - vtx0;
 				EdgeEntry edge_entry = { 
 					vtx0.x, //x of upper vertex
 					vtx0.z, // z of upper vertex
@@ -118,6 +108,24 @@ void ScanLine::draw() {
 				edge_table[int(vtx0.y)].emplace(edge_entry.faceID, edge_entry);
 			}
 		}
+
+		glm::vec3 screen_normal = glm::normalize(glm::cross(edges[0], edges[1]));
+		screen_normal = glm::dot(screen_normal, world_normal) > 0 ? screen_normal : -screen_normal;
+
+		world_normal = (world_normal + glm::vec3(1)) / 2.0f;
+
+		// put entry into polygon_table
+		PolygonEntry polygon_entry = {
+			screen_normal,
+			i,
+			polygon_dy,
+			white * intensity,
+			//white, // debug purpose
+			//TGAColor(i * (255.0 / model.num_faces), 0, 0, 255)
+			//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255)
+		};
+		//polygon_table[int(y_max)].push_back(polygon_entry);
+		polygon_table[int(y_max)].emplace(polygon_entry.faceID, polygon_entry);
 	}
 
 	// scan process: from top to bottom
@@ -159,8 +167,10 @@ void ScanLine::draw() {
 				//	}
 				//}
 
-				// ensure that edge0 is the leftside edge
-				if (edges[0].x_at_ymax > edges[1].x_at_ymax) {
+				// ensure that edge0 is the leftside edge: two cases
+				// 1. /\ (most cases) 
+				// 2. \/ (speical one: the upper edge is horizontal
+				if ((edges[0].x_at_ymax == edges[1].x_at_ymax && edges[0].dx > edges[1].dx) || (edges[0].x_at_ymax > edges[1].x_at_ymax)) {
 					std::reverse(edges.begin(), edges.end());
 				}
 				//if (edge0->dx > edge1->dx) {
@@ -191,7 +201,7 @@ void ScanLine::draw() {
 			// update pixels from left to right
 			for (int x = active_edge.xl; x < active_edge.xr; x++) {
 				// update buffer contents
-				float z = active_edge.zl + x * active_edge.dzx;
+				float z = active_edge.zl + (x-active_edge.xl) * active_edge.dzx;
 				if (z > z_buffer[y * width + x]) {
 					z_buffer[y * width + x] = z;
 					framebuffer->set(x, y, active_polygon_table[active_edge.faceID].color);
