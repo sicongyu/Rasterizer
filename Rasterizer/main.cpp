@@ -12,12 +12,12 @@ int main(int argc, char** argv) {
 	start = time(NULL);
 
 	int width = 800;
-	int height = 600;
-	Rasterizer* rasterizer = new ScanLine(width, height, "m1911.obj");
+	int height = 800;
+	Rasterizer* rasterizer = new ScanLine(width, height, "cube1.obj");
 	rasterizer->draw();
-	rasterizer->getFramebuffer()->flip_vertically();// i want to have the origin at the left bottom corner of the image
+	//rasterizer->getFramebuffer()->flip_vertically();// i want to have the origin at the left bottom corner of the image
 	rasterizer->getFramebuffer()->write_tga_file("output.tga");
-
+	delete rasterizer;
 	end = time(NULL);
 	printf("Time Elapsed: %ld", end - start);
 	//std::cout << "Time elapesd: " << (end - start) << std::endl;
