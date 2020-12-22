@@ -1,6 +1,7 @@
 #include "rasterizer.h"
 #include <memory>
 #include <cmath>
+#include "timer.h"
 
 #define FLT_MAX 3.402823466e+38F
 
@@ -34,6 +35,7 @@ ScanLine::~ScanLine() {
 }
 
 void ScanLine::draw() {
+	TIMING_BEGIN("Start Rasterization")
 	TGAColor white = TGAColor(255, 255, 255, 255);
 	// create polygon_table and edge_table
 	for (int i = 0; i < model.num_faces; i++) {
@@ -43,6 +45,8 @@ void ScanLine::draw() {
 		int y_map[3];
 		float y_max = -FLT_MAX;
 		float y_min = FLT_MAX;
+		float x_max = -FLT_MAX;
+		float x_min = FLT_MAX;
 		glm::vec2 abs_max = glm::vec2(box_max(abs(model.max.x), abs(model.min.x)), box_max(abs(model.max.y), abs(model.min.y)));
 		glm::vec3 world_normal = model.normals[3 * i]; // every three vtxs share the same normal;
 		for (int j = 0; j < 3; j++) {
@@ -62,13 +66,12 @@ void ScanLine::draw() {
 				y_min = vtx.y;
 				y_map[2] = j;
 			}
+			x_max = box_max(vtx.x, x_max);
+			x_min = box_min(vtx.x, x_min);
 			vertices[j] = vtx;
 		}
 
 		int polygon_dy = (int)y_max - (int)y_min + 1;
-		if (polygon_dy == 1) {
-			continue; // skip triangles that covers only one row;
-		}
 
 		// Occasionally when three vertices share the same y value, i.e., in the xoz plane
 		if (y_map[0] == y_map[2]) {
@@ -83,6 +86,11 @@ void ScanLine::draw() {
 		float intensity = box_max(glm::dot(-world_normal, light_dir), 0.0f);
 
 		glm::vec3 edges[3];
+
+
+		if (i == 4092) {
+			int err = 0;
+		}
 		// combination of (0, 1), (0, 2), (1, 2), put entries into edge_table
 		for (int m = 0; m < 2; m++) {
 			for (int n = m + 1; n < 3; n++) {
@@ -93,7 +101,7 @@ void ScanLine::draw() {
 				edges[m + n - 1] = edge;
 
 				int edge_dy = (int)vtx0.y - (int)vtx1.y + 1;
-				if (edge_dy == 1) {
+				if (edge_dy == 1 && m + n == 1) {
 					continue; // discard edges that covers only one row
 				}
 
@@ -121,8 +129,10 @@ void ScanLine::draw() {
 			polygon_dy,
 			white * intensity,
 			//white, // debug purpose
-			//TGAColor(i * (255.0 / model.num_faces), 0, 0, 255)
-			//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255)
+			//TGAColor(i * (255.0 / model.num_faces), 0, 0, 255),
+			//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255),
+			x_min,
+			x_max
 		};
 		//polygon_table[int(y_max)].push_back(polygon_entry);
 		polygon_table[int(y_max)].emplace(polygon_entry.faceID, polygon_entry);
@@ -130,8 +140,8 @@ void ScanLine::draw() {
 
 	// scan process: from top to bottom
 	for (int y = height-1; y >= 0; y--) {
-		if (y == 460) {
-			int err = 0;
+		if (y == 674) {
+			int err = 1;
 		}
 		// add new active polygons and edges
 		if (!polygon_table[y].empty()) {
@@ -141,8 +151,18 @@ void ScanLine::draw() {
 				// add entries to active polygon table
 				//active_polygon_table.push_back(polygon);
 				active_polygon_table.emplace(faceID, polygon);
+
+				//if (polygon.dy == 1) {
+				//	ActiveEdgeEntry active_edge_entry = {
+				//		polygon.xl, -1/* doesn't care */, 1,
+				//		polygon.xr, -1/* doesn't care */, 1,
+				//		edges[0].z_at_ymax, -polygon.plane.x / c, polygon.plane.y / c,
+				//		faceID
+				//	};
+				//	continue;
+				//}
 				
-				if (faceID == 13) {
+				if (faceID == 4092) {
 					int err = 0;
 				}
 
@@ -156,16 +176,6 @@ void ScanLine::draw() {
 				for (;cnt > 0; cnt--, edge++) {
 					edges.push_back(edge->second);
 				}
-				//for (edge : edge_table[y]) {
-				//	if (edge.faceID == polygon.faceID) {
-				//		if (!edge0) {
-				//			edge0 = &edge;
-				//		}
-				//		else if (!edge1) {
-				//			edge1 = &edge;
-				//		}
-				//	}
-				//}
 
 				// ensure that edge0 is the leftside edge: two cases
 				// 1. /\ (most cases) 
@@ -173,9 +183,6 @@ void ScanLine::draw() {
 				if ((edges[0].x_at_ymax == edges[1].x_at_ymax && edges[0].dx > edges[1].dx) || (edges[0].x_at_ymax > edges[1].x_at_ymax)) {
 					std::reverse(edges.begin(), edges.end());
 				}
-				//if (edge0->dx > edge1->dx) {
-				//	std::swap(edge0, edge1);
-				//}
 
 				// add entries to active edge table
 				//float c = polygon.plane.z == 0 ? 0.0001 : polygon.plane.z;
@@ -197,21 +204,39 @@ void ScanLine::draw() {
 			//	active_edge_table.erase(active_edge);
 			//}
 			auto& active_edge = active_edge_pair_iter->second;
+			auto& active_polygon = active_polygon_table[active_edge_pair_iter->first];
+
+			if (active_edge.faceID == 4092) {
+				int err = 0;
+			}
 
 			// update pixels from left to right
-			for (int x = active_edge.xl; x < active_edge.xr; x++) {
+			for (int x = active_edge.xl + 0.5f; x < active_edge.xr + 0.5f; x++) {
 				// update buffer contents
-				float z = active_edge.zl + (x-active_edge.xl) * active_edge.dzx;
+				float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;
 				if (z > z_buffer[y * width + x]) {
 					z_buffer[y * width + x] = z;
-					framebuffer->set(x, y, active_polygon_table[active_edge.faceID].color);
+					framebuffer->set(x, y, active_polygon.color);
 				}
+
+				//debug
+				if (y == 308 && x == 395) {
+					int err = 0;
+				}
+			}
+
+			{
+				active_edge.xl += active_edge.dxl;
+				active_edge.xl = box_max(active_polygon.xl, active_edge.xl);
+				active_edge.xr += active_edge.dxr;
+				active_edge.xr = box_min(active_polygon.xr, active_edge.xr);
+				active_edge.zl += active_edge.dzx * active_edge.dxl + active_edge.dzy;
 			}
 
 			// update active edge
 			active_edge.dyl--;
 			active_edge.dyr--;
-			auto polygon_dy = --active_polygon_table[active_edge.faceID].dy;
+			auto polygon_dy = --active_polygon.dy;
 
 			if (active_edge.dyl == 0 && active_edge.dyr == 0) {
 				if (polygon_dy != 0) {
@@ -233,22 +258,8 @@ void ScanLine::draw() {
 					active_edge.dyr = new_edge.dy - 1;
 				}
 			}
-
-			{
-				active_edge.xl += active_edge.dxl;
-				active_edge.xr += active_edge.dxr;
-				active_edge.zl += active_edge.dzx * active_edge.dxl + active_edge.dzy;
-			}
 			++active_edge_pair_iter;
 		}
-
-		//// check if any polygon ends here (newly added edges may also end immediately -- may not handled properly)
-		//for (auto active_polygon_iter = active_polygon_table.begin(); active_polygon_iter != active_polygon_table.end(); active_polygon_iter++) {
-		//	active_polygon_iter->second.dy--;
-		//	if (active_polygon_iter->second.dy == 0) {
-		//		// remove the polygon itself
-		//		active_polygon_table.erase(active_polygon_iter);
-		//	}
-		//}
 	}
+	TIMING_END("Rasterization Done")
 }

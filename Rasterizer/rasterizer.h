@@ -46,10 +46,6 @@ private:
 	std::vector<std::unordered_multimap<int, EdgeEntry>> edge_table;
 	std::unordered_map<int, PolygonEntry> active_polygon_table;
 	std::unordered_map<int, ActiveEdgeEntry> active_edge_table;
-	//std::vector<PolygonEntry> * polygon_table;
-	//std::vector<EdgeEntry> * edge_table;
-	//std::vector<PolygonEntry> active_polygon_table;
-	//std::vector<ActiveEdgeEntry> active_edge_table;
 	float* z_buffer;
 	
 };

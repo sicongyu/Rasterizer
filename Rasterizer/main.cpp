@@ -2,25 +2,20 @@
 //
 
 #include <iostream>
-#include <time.h>
 #include "tgaimage.h"
 #include "rasterizer.h"
 #include <glm/glm.hpp>
 
 int main(int argc, char** argv) {
-	time_t start, end;
-	start = time(NULL);
 
-	int width = 800;
-	int height = 800;
-	Rasterizer* rasterizer = new ScanLine(width, height, "sphere.obj");
+	int width = 1024;
+	int height = 1024;
+	Rasterizer* rasterizer = new ScanLine(width, height, "ninjaHead.obj");
 	rasterizer->draw();
 	//rasterizer->getFramebuffer()->flip_vertically();// i want to have the origin at the left bottom corner of the image
 	rasterizer->getFramebuffer()->write_tga_file("output.tga");
 	delete rasterizer;
-	end = time(NULL);
-	printf("Time Elapsed: %ld", end - start);
-	//std::cout << "Time elapesd: " << (end - start) << std::endl;
+
 	return 0;
 }
 

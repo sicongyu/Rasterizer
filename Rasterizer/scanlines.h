@@ -7,6 +7,8 @@ struct PolygonEntry {
 	int faceID;
 	int dy;
 	TGAColor color;
+	float xl;
+	float xr;
 };
 
 struct EdgeEntry {

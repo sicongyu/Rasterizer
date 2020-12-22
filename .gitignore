@@ -5,6 +5,10 @@
 
 # Program Outputs
 *.tga
+*.png
+*.obj
+Models/
+Outputs/
 
 # User-specific files
 *.rsuser

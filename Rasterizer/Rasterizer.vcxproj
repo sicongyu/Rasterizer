@@ -24,6 +24,7 @@
     <ClInclude Include="rasterizer.h" />
     <ClInclude Include="scanlines.h" />
     <ClInclude Include="tgaimage.h" />
+    <ClInclude Include="timer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="objloader.cpp" />
