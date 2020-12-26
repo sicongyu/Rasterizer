@@ -10,10 +10,10 @@ int main(int argc, char** argv) {
 
 	int width = 1024;
 	int height = 1024;
-	Rasterizer* rasterizer = new ScanLine(width, height, "ninjaHead.obj");
+	Rasterizer* rasterizer = new ScanLine(width, height, "Models/cerberus.obj");
 	rasterizer->draw();
-	//rasterizer->getFramebuffer()->flip_vertically();// i want to have the origin at the left bottom corner of the image
-	rasterizer->getFramebuffer()->write_tga_file("output.tga");
+	rasterizer->getFramebuffer()->flip_vertically();// i want to have the origin at the left bottom corner of the image
+	rasterizer->getFramebuffer()->write_tga_file("Outputs/output.tga");
 	delete rasterizer;
 
 	return 0;

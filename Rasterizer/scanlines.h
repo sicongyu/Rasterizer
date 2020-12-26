@@ -9,6 +9,7 @@ struct PolygonEntry {
 	TGAColor color;
 	float xl;
 	float xr;
+	float znear;
 };
 
 struct EdgeEntry {

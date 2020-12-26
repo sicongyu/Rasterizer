@@ -1,16 +1,19 @@
 #include "rasterizer.h"
 #include <memory>
 #include <cmath>
+#include <functional>
 #include "timer.h"
+#include <glm/gtc/matrix_transform.hpp>
 
 #define FLT_MAX 3.402823466e+38F
+#define SIGN_MASK 0x80000000
 
 Rasterizer::Rasterizer(int width, int height, const char* path) :
 	width(width), height(height), model(path) {
-	//framebuffer = new TGAColor[width * height];
-	//memset(framebuffer, 0, sizeof(TGAColor) * width * height);
 	framebuffer = new TGAImage(width, height, TGAImage::RGB);
 	light_dir = glm::vec3(0.0f, 0.0f, -1.0f);
+	polygon_table = std::vector<std::unordered_map<int, PolygonEntry>>(height);
+	edge_table = std::vector<std::unordered_multimap<int, EdgeEntry>>(height);
 }
 
 Rasterizer::~Rasterizer() {
@@ -19,24 +22,49 @@ Rasterizer::~Rasterizer() {
 
 ScanLine::ScanLine(int width, int height, const char* path) :
 	Rasterizer(width, height, path) {
-	//polygon_table = new std::vector<PolygonEntry>[height];
-	//edge_table = new std::vector<EdgeEntry>[height];
-	polygon_table = std::vector<std::unordered_map<int, PolygonEntry>>(height);
-	edge_table = std::vector<std::unordered_multimap<int, EdgeEntry>>(height);
+#if !HIERACHY_ZBUFFER
 	z_buffer = new float[height * width];
 	std::fill_n(z_buffer, height * width, -FLT_MAX);
-	//memset(z_buffer, 128, sizeof(float) * width * height);
+#else
+	// Hierachy z-buffer: the smaller lod is, the blurer the picture
+	_lod = log2(width) + 1; // Assume height == width
+	z_buffer = new float*[_lod];
+	for (int i = 0; i < _lod; i++) {
+		int buffer_length = pow(4, i);
+		z_buffer[i] = new float[buffer_length];
+		std::fill_n(z_buffer[i], buffer_length, -FLT_MAX);
+	}
+#endif
 }
 
 ScanLine::~ScanLine() {
-	//delete[] polygon_table;
-	//delete[] edge_table;
+#if !HIERACHY_ZBUFFER
 	delete[] z_buffer;
+#else
+	for (int i = 0; i < _lod; i++) {
+		delete[] z_buffer[i];
+	}
+	delete[] z_buffer;
+#endif // !HIERACHY_ZBUFFER
+
 }
+
+//HiZScanLine::HiZScanLine(int width, int height, const char* path) :
+//	Rasterizer(width, height, path) {
+//	z_buffer = new float*[HIERACHY_ZBUFFER];
+//}
 
 void ScanLine::draw() {
 	TIMING_BEGIN("Start Rasterization")
 	TGAColor white = TGAColor(255, 255, 255, 255);
+	// the lookat matrix for cerberus
+	glm::mat4 view = glm::lookAt(
+		glm::vec3(-2.0, 0.0, 2.5), // eye
+		glm::vec3(0.0, 0.0, 0.0), // center
+		glm::vec3(0.0, 1.0, 0.0) // up
+	);
+	glm::mat4 proj = glm::perspective(45.0f, 1.0f, 0.3f, 1000.0f);
+	//glm::mat4 orhto = glm::ortho(-1.5f, 1.5f, -2.0f, 2.0f);
 	// create polygon_table and edge_table
 	for (int i = 0; i < model.num_faces; i++) {
 		// for every vertices in the triangle
@@ -47,16 +75,18 @@ void ScanLine::draw() {
 		float y_min = FLT_MAX;
 		float x_max = -FLT_MAX;
 		float x_min = FLT_MAX;
+		float z_max = -FLT_MAX;
 		glm::vec2 abs_max = glm::vec2(box_max(abs(model.max.x), abs(model.min.x)), box_max(abs(model.max.y), abs(model.min.y)));
 		glm::vec3 world_normal = model.normals[3 * i]; // every three vtxs share the same normal;
 		for (int j = 0; j < 3; j++) {
 			// convert into screen space
-			//glm::vec3 vtx = (model.vertices[3 * i + j] - model.min) / (1.5f * (model.max - model.min));
-			glm::vec3 vtx = model.vertices[3 * i + j];
-			glm::vec2 vtx2d = (glm::vec2(vtx.x, vtx.y) / (1.5f * abs_max) + glm::vec2(1.0f)) * glm::vec2(width / 2, height / 2);
-			vtx = glm::vec3(vtx2d.x, vtx2d.y, vtx.z);
-			//vtx.x *= width;
-			//vtx.y *= height;
+			//glm::vec3 vtx = model.vertices[3 * i + j];
+			//glm::vec2 vtx2d = (glm::vec2(vtx.x, vtx.y) / (1.5f * abs_max) + glm::vec2(1.0f)) * glm::vec2(width / 2, height / 2);
+			//vtx = glm::vec3(vtx2d.x, vtx2d.y, vtx.z);
+
+			glm::vec3 vtx = glm::vec3(proj * view * glm::vec4(model.vertices[3 * i + j], 1.0));
+			vtx.x = (vtx.x + 1) * width / 2;
+			vtx.y = (vtx.y + 1) * height / 2;
 
 			if (vtx.y > y_max) {
 				y_max = vtx.y;
@@ -68,6 +98,7 @@ void ScanLine::draw() {
 			}
 			x_max = box_max(vtx.x, x_max);
 			x_min = box_min(vtx.x, x_min);
+			z_max = box_max(vtx.z, z_max);
 			vertices[j] = vtx;
 		}
 
@@ -83,7 +114,7 @@ void ScanLine::draw() {
 			throw "Error: invalid y_map index";
 		}
 
-		float intensity = box_max(glm::dot(-world_normal, light_dir), 0.0f);
+		float intensity = box_max(glm::dot(world_normal, -light_dir), 0.0f);
 
 		glm::vec3 edges[3];
 
@@ -113,6 +144,9 @@ void ScanLine::draw() {
 					edge_dy // dy, notice that the height of vtx0 must be greater than vtx1
 				};
 				//edge_table[int(vtx0.y)].push_back(edge_entry);
+				if (int(vtx0.y) < 0 || int(vtx0.y) >= height) {
+					continue;
+				}
 				edge_table[int(vtx0.y)].emplace(edge_entry.faceID, edge_entry);
 			}
 		}
@@ -124,17 +158,21 @@ void ScanLine::draw() {
 
 		// put entry into polygon_table
 		PolygonEntry polygon_entry = {
-			screen_normal,
-			i,
-			polygon_dy,
-			white * intensity,
+			screen_normal, // plane
+			i, //faceID
+			polygon_dy, // dy
+			white * intensity, // color
 			//white, // debug purpose
 			//TGAColor(i * (255.0 / model.num_faces), 0, 0, 255),
 			//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255),
-			x_min,
-			x_max
+			x_min, // xl
+			x_max, // xr
+			z_max // znear
 		};
 		//polygon_table[int(y_max)].push_back(polygon_entry);
+		if (signbit(y_max)) {
+			continue;
+		}
 		polygon_table[int(y_max)].emplace(polygon_entry.faceID, polygon_entry);
 	}
 
@@ -148,19 +186,45 @@ void ScanLine::draw() {
 			for (auto polygon_table_iter : polygon_table[y]) {
 				int faceID = polygon_table_iter.first;
 				auto polygon = polygon_table_iter.second;
+
+
+#if HIERACHY_ZBUFFER
+				// do znear check before rasterization a polygon
+				std::function<bool(int, int, int)> traversal = [this, &traversal, &polygon, &y](int mip_x, int mip_y, int lod) {
+					// if the polygon has znear closer than current z: try to draw it!
+					if (polygon.znear > z_buffer[lod][mip_y * (int)pow(2, lod) + mip_x]) {
+						// if has reached base z-buffer: draw it!
+						if (lod == this->_lod - 1) {
+							return true;
+						}
+						// recursively subdivide the quad
+						else {
+							for (int i = 0; i < 4; i++) {
+								int sub_x = 2 * mip_x + i % 2;
+								int sub_y = 2 * mip_y + i / 2;
+								int sub_node_length = pow(2, _lod - lod - 2);
+								if (sub_x < (int)polygon.xl / sub_node_length || sub_x >(int)polygon.xr / sub_node_length ||
+									sub_y < (y - polygon.dy) / sub_node_length || sub_y > y / sub_node_length) {
+									continue;
+								}
+								if (traversal(sub_x, sub_y, lod + 1)) {
+									return true;
+								}
+							}
+						}
+					}
+					return false;
+				};
+
+				// if depth test fails: dont't emplace this triangle
+				if (!traversal(0, 0, 0)) {
+					continue;
+				}
+#endif // HIERACHY_ZBUFFER
+
 				// add entries to active polygon table
 				//active_polygon_table.push_back(polygon);
 				active_polygon_table.emplace(faceID, polygon);
-
-				//if (polygon.dy == 1) {
-				//	ActiveEdgeEntry active_edge_entry = {
-				//		polygon.xl, -1/* doesn't care */, 1,
-				//		polygon.xr, -1/* doesn't care */, 1,
-				//		edges[0].z_at_ymax, -polygon.plane.x / c, polygon.plane.y / c,
-				//		faceID
-				//	};
-				//	continue;
-				//}
 				
 				if (faceID == 4092) {
 					int err = 0;
@@ -211,13 +275,32 @@ void ScanLine::draw() {
 			}
 
 			// update pixels from left to right
-			for (int x = active_edge.xl + 0.5f; x < active_edge.xr + 0.5f; x++) {
+			for (int x = active_edge.xl + 0.5f; x <= active_edge.xr + 0.5f; x++) {
 				// update buffer contents
 				float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;
+#if !HIERACHY_ZBUFFER
 				if (z > z_buffer[y * width + x]) {
 					z_buffer[y * width + x] = z;
 					framebuffer->set(x, y, active_polygon.color);
 				}
+#else			
+				if (z > z_buffer[_lod - 1][y * width + x]) {
+					z_buffer[_lod - 1][y * width + x] = z;
+					framebuffer->set(x, y, active_polygon.color);
+					// update the hierachy z-buffer
+					for (int i = _lod - 2; i >= 0; i--) {
+						int mip_x = x / (int)pow(2, _lod - (1 + i));
+						int mip_y = y / (int)pow(2, _lod - (1 + i));
+						auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
+						for (int j = 0; j < 4; j++) {
+							int sub_x = 2 * mip_x + j % 2;
+							int sub_y = 2 * mip_y + j / 2;
+							auto& z_in_sub = z_buffer[i + 1][sub_y * (int)pow(2, i + 1) + sub_x];
+							z_in_buffer = box_min(z_in_sub, z_in_buffer);
+						}
+					}
+				}
+#endif // !HIERACHY_ZBUFFER
 
 				//debug
 				if (y == 308 && x == 395) {
