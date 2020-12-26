@@ -11,7 +11,7 @@
 Rasterizer::Rasterizer(int width, int height, const char* path) :
 	width(width), height(height), model(path) {
 	framebuffer = new TGAImage(width, height, TGAImage::RGB);
-	light_dir = glm::vec3(0.0f, 0.0f, -1.0f);
+	light_dir = glm::vec3(0.0f, 0.0f, 1.0f);
 	polygon_table = std::vector<std::unordered_map<int, PolygonEntry>>(height);
 	edge_table = std::vector<std::unordered_multimap<int, EdgeEntry>>(height);
 }
@@ -58,13 +58,15 @@ void ScanLine::draw() {
 	TIMING_BEGIN("Start Rasterization")
 	TGAColor white = TGAColor(255, 255, 255, 255);
 	// the lookat matrix for cerberus
+	glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f);
+	glm::vec3 eye = glm::vec3(0.0, 0.0, 3.0);
 	glm::mat4 view = glm::lookAt(
-		glm::vec3(-2.0, 0.0, 2.5), // eye
-		glm::vec3(0.0, 0.0, 0.0), // center
+		eye,
+		eye + cameraFront,
 		glm::vec3(0.0, 1.0, 0.0) // up
 	);
-	glm::mat4 proj = glm::perspective(45.0f, 1.0f, 0.3f, 1000.0f);
-	//glm::mat4 orhto = glm::ortho(-1.5f, 1.5f, -2.0f, 2.0f);
+	glm::mat4 proj = glm::perspective(45.0f, 1.0f, 0.3f, 100.0f);
+	glm::mat4 ortho = glm::ortho(-1.2f, 0.7f, -1.0f, 1.0f);
 	// create polygon_table and edge_table
 	for (int i = 0; i < model.num_faces; i++) {
 		// for every vertices in the triangle
@@ -84,7 +86,7 @@ void ScanLine::draw() {
 			//glm::vec2 vtx2d = (glm::vec2(vtx.x, vtx.y) / (1.5f * abs_max) + glm::vec2(1.0f)) * glm::vec2(width / 2, height / 2);
 			//vtx = glm::vec3(vtx2d.x, vtx2d.y, vtx.z);
 
-			glm::vec3 vtx = glm::vec3(proj * view * glm::vec4(model.vertices[3 * i + j], 1.0));
+			glm::vec3 vtx = glm::vec3(ortho * view * glm::vec4(model.vertices[3 * i + j], 1.0));
 			vtx.x = (vtx.x + 1) * width / 2;
 			vtx.y = (vtx.y + 1) * height / 2;
 
@@ -170,7 +172,8 @@ void ScanLine::draw() {
 			z_max // znear
 		};
 		//polygon_table[int(y_max)].push_back(polygon_entry);
-		if (signbit(y_max)) {
+
+		if (int(y_max) < 0 || int(y_max) >= height) {
 			continue;
 		}
 		polygon_table[int(y_max)].emplace(polygon_entry.faceID, polygon_entry);
