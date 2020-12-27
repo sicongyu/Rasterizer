@@ -181,9 +181,6 @@ void ScanLine::draw() {
 
 	// scan process: from top to bottom
 	for (int y = height-1; y >= 0; y--) {
-		if (y == 674) {
-			int err = 1;
-		}
 		// add new active polygons and edges
 		if (!polygon_table[y].empty()) {
 			for (auto polygon_table_iter : polygon_table[y]) {
