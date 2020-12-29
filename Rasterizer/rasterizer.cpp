@@ -5,15 +5,19 @@
 #include "timer.h"
 #include <glm/gtc/matrix_transform.hpp>
 
-#define FLT_MAX 3.402823466e+38F
-#define SIGN_MASK 0x80000000
-
 Rasterizer::Rasterizer(int width, int height, const char* path) :
 	width(width), height(height), model(path) {
 	framebuffer = new TGAImage(width, height, TGAImage::RGB);
 	light_dir = glm::vec3(0.0f, 0.0f, 1.0f);
-	polygon_table = std::vector<std::unordered_map<int, PolygonEntry>>(height);
-	edge_table = std::vector<std::unordered_multimap<int, EdgeEntry>>(height);
+	// the lookat matrix for cerberus
+	glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f);
+	glm::vec3 eye = glm::vec3(0.0, 0.0, 3.0);
+	view = glm::lookAt(
+		eye,
+		eye + cameraFront,
+		glm::vec3(0.0, 1.0, 0.0) // up
+	);
+	ortho = glm::ortho(-1.2f, 0.7f, -1.0f, 1.0f);
 }
 
 Rasterizer::~Rasterizer() {
@@ -22,6 +26,8 @@ Rasterizer::~Rasterizer() {
 
 ScanLine::ScanLine(int width, int height, const char* path) :
 	Rasterizer(width, height, path) {
+	polygon_table = std::vector<std::unordered_map<int, PolygonEntry>>(height);
+	edge_table = std::vector<std::unordered_multimap<int, EdgeEntry>>(height);
 #if !HIERACHY_ZBUFFER
 	z_buffer = new float[height * width];
 	std::fill_n(z_buffer, height * width, -FLT_MAX);
@@ -56,17 +62,6 @@ ScanLine::~ScanLine() {
 
 void ScanLine::draw() {
 	TIMING_BEGIN("Start Rasterization")
-	TGAColor white = TGAColor(255, 255, 255, 255);
-	// the lookat matrix for cerberus
-	glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f);
-	glm::vec3 eye = glm::vec3(0.0, 0.0, 3.0);
-	glm::mat4 view = glm::lookAt(
-		eye,
-		eye + cameraFront,
-		glm::vec3(0.0, 1.0, 0.0) // up
-	);
-	glm::mat4 proj = glm::perspective(45.0f, 1.0f, 0.3f, 100.0f);
-	glm::mat4 ortho = glm::ortho(-1.2f, 0.7f, -1.0f, 1.0f);
 	// create polygon_table and edge_table
 	for (int i = 0; i < model.num_faces; i++) {
 		// for every vertices in the triangle
@@ -120,10 +115,6 @@ void ScanLine::draw() {
 
 		glm::vec3 edges[3];
 
-
-		if (i == 4092) {
-			int err = 0;
-		}
 		// combination of (0, 1), (0, 2), (1, 2), put entries into edge_table
 		for (int m = 0; m < 2; m++) {
 			for (int n = m + 1; n < 3; n++) {
@@ -190,34 +181,7 @@ void ScanLine::draw() {
 
 #if HIERACHY_ZBUFFER
 				// do znear check before rasterization a polygon
-				std::function<bool(int, int, int)> traversal = [this, &traversal, &polygon, &y](int mip_x, int mip_y, int lod) {
-					// if the polygon has znear closer than current z: try to draw it!
-					if (polygon.znear > z_buffer[lod][mip_y * (int)pow(2, lod) + mip_x]) {
-						// if has reached base z-buffer: draw it!
-						if (lod == this->_lod - 1) {
-							return true;
-						}
-						// recursively subdivide the quad
-						else {
-							for (int i = 0; i < 4; i++) {
-								int sub_x = 2 * mip_x + i % 2;
-								int sub_y = 2 * mip_y + i / 2;
-								int sub_node_length = pow(2, _lod - lod - 2);
-								if (sub_x < (int)polygon.xl / sub_node_length || sub_x >(int)polygon.xr / sub_node_length ||
-									sub_y < (y - polygon.dy) / sub_node_length || sub_y > y / sub_node_length) {
-									continue;
-								}
-								if (traversal(sub_x, sub_y, lod + 1)) {
-									return true;
-								}
-							}
-						}
-					}
-					return false;
-				};
-
-				// if depth test fails: dont't emplace this triangle
-				if (!traversal(0, 0, 0)) {
+				if (!TraverseZBuffer(polygon.znear, 0, 0, 0, polygon.xl, polygon.xr, y - polygon.dy, y)) {
 					continue;
 				}
 #endif // HIERACHY_ZBUFFER
@@ -342,6 +306,215 @@ void ScanLine::draw() {
 				}
 			}
 			++active_edge_pair_iter;
+		}
+	}
+	TIMING_END("Rasterization Done")
+}
+
+#if HIERACHY_ZBUFFER || OCTREE
+bool ScanLine::TraverseZBuffer(float targetZ, int mip_x, int mip_y, int lod, int xmin, int xmax, int ymin, int ymax) {
+	// if the polygon has znear closer than current z: try to draw it!
+	if (targetZ > z_buffer[lod][mip_y * (int)pow(2, lod) + mip_x]) {
+		// if has reached base z-buffer: draw it!
+		if (lod == this->_lod - 1) {
+			return true;
+		}
+		// recursively subdivide the quad
+		else {
+			for (int i = 0; i < 4; i++) {
+				int sub_x = 2 * mip_x + i % 2;
+				int sub_y = 2 * mip_y + i / 2;
+				int sub_node_length = pow(2, _lod - lod - 2);
+				if (sub_x < xmin / sub_node_length || sub_x > xmax / sub_node_length ||
+					sub_y < ymin / sub_node_length || sub_y > ymax / sub_node_length) {
+					continue;
+				}
+				if (TraverseZBuffer(targetZ, sub_x, sub_y, lod + 1, xmin, xmax, ymin, ymax)) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+#endif
+
+OctreeZBuffer::OctreeZBuffer(int width, int height, const char* path) : 
+	ScanLine(width, height, path),
+	_octree(&model, *this){
+}
+
+OctreeZBuffer::~OctreeZBuffer() {}
+
+void OctreeZBuffer::draw() {
+	TIMING_BEGIN("Start Octree Rasterization")
+
+	// Traverse through the octree
+	std::list<OctreeNode*> stage;
+	stage.push_back(_octree.Root());
+	while (!stage.empty()) {
+		OctreeNode* node = stage.back();
+		// visibility test of the node
+		float halfLength = node->_length / 2;
+		if (!TraverseZBuffer(node->_center.z + halfLength, 0, 0, 0,
+			(int)(node->_center.x - halfLength),
+			(int)(node->_center.x + halfLength),
+			(int)(node->_center.y - halfLength),
+			(int)(node->_center.y + halfLength))) 
+		{
+			continue;
+		}
+		// if there are triangles in this ndoe: rasterize it!
+		for (auto i : node->_faceIDs) {
+			glm::vec3 world_normal = model.normals[3 * i]; // every three vtxs share the same normal;
+			// for every vertices in the triangle
+			glm::vec3 vertices[3];
+			int y_map[3];
+			float y_max = -FLT_MAX;
+			float y_min = FLT_MAX;
+			float x_max = -FLT_MAX;
+			float x_min = FLT_MAX;
+			float z_max = -FLT_MAX;
+			for (int j = 0; j < 3; j++) {
+				// convert into screen space
+				//glm::vec3 vtx = model.vertices[3 * i + j];
+				//glm::vec2 vtx2d = (glm::vec2(vtx.x, vtx.y) / (1.5f * abs_max) + glm::vec2(1.0f)) * glm::vec2(width / 2, height / 2);
+				//vtx = glm::vec3(vtx2d.x, vtx2d.y, vtx.z);
+
+				glm::vec3 vtx = _verticesScreenspace[3 * i + j];
+				if (vtx.y > y_max) {
+					y_max = vtx.y;
+					y_map[0] = j;
+				}
+				if (vtx.y < y_min) {
+					y_min = vtx.y;
+					y_map[2] = j;
+				}
+				x_max = box_max(vtx.x, x_max);
+				x_min = box_min(vtx.x, x_min);
+				z_max = box_max(vtx.z, z_max);
+				vertices[j] = vtx;
+			}
+
+			int polygon_dy = (int)y_max - (int)y_min + 1;
+
+			// Occasionally when three vertices share the same y value, i.e., in the xoz plane
+			if (y_map[0] == y_map[2]) {
+				// assign an oreder manually
+				y_map[2] = 2;
+			}
+			y_map[1] = 3 - y_map[0] - y_map[2];
+			if (!(y_map[1] >= 0 && y_map[1] <= 2)) {
+				throw "Error: invalid y_map index";
+			}
+
+			float intensity = box_max(glm::dot(world_normal, -light_dir), 0.0f);
+
+			glm::vec3 edges[3]; // raw data of edges are kept for computing screen-space normal
+			std::vector<EdgeEntry> edgeEntries(3); // Edge entries are kept for creating active edge entry
+			for (int m = 0; m < 2; m++) {
+				for (int n = m + 1; n < 3; n++) {
+					glm::vec3 vtx0 = vertices[y_map[m]];
+					glm::vec3 vtx1 = vertices[y_map[n]];
+					glm::vec3 edge = vtx1 - vtx0;
+					edges[m + n - 1] = edge;
+
+					int edge_dy = (int)vtx0.y - (int)vtx1.y + 1;
+					if (edge_dy == 1 && m + n == 1) {
+						continue; // discard edges that covers only one row
+					}
+
+					EdgeEntry edge_entry = {
+						vtx0.x, //x of upper vertex
+						vtx0.z, // z of upper vertex
+						-(edge.x / edge.y), // dx (edge.y is negative)
+						i, // faceID
+						edge_dy // dy, notice that the height of vtx0 must be greater than vtx1
+					};
+					if (int(vtx0.y) < 0 || int(vtx0.y) >= height) {
+						continue;
+					}
+					edgeEntries[m + n - 1] = edge_entry;
+				}
+			}
+
+			glm::vec3 screen_normal = glm::normalize(glm::cross(edges[0], edges[1]));
+			screen_normal = glm::dot(screen_normal, world_normal) > 0 ? screen_normal : -screen_normal;
+
+			//world_normal = (world_normal + glm::vec3(1)) / 2.0f;
+
+			PolygonEntry polygon = {
+				screen_normal, // plane
+				i, //faceID
+				polygon_dy, // dy
+				white * intensity, // color
+				//white, // debug purpose
+				//TGAColor(i * (255.0 / model.num_faces), 0, 0, 255),
+				//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255),
+				x_min, // xl
+				x_max, // xr
+				z_max // znear
+			};
+
+			ActiveEdgeEntry active_edge = {
+				edgeEntries[0].x_at_ymax, edgeEntries[0].dx, edgeEntries[0].dy,
+				edgeEntries[1].x_at_ymax, edgeEntries[1].dx, edgeEntries[1].dy,
+				edgeEntries[0].z_at_ymax, -polygon.plane.x / polygon.plane.z, polygon.plane.y / polygon.plane.z,
+				i
+			};
+
+			for (int y = y_max; y > y_max - polygon_dy; y--) {
+				// update pixels from left to right
+				for (int x = active_edge.xl + 0.5f; x <= active_edge.xr + 0.5f; x++) {
+					// update buffer contents
+					float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;	
+					if (z > z_buffer[_lod - 1][y * width + x]) {
+						z_buffer[_lod - 1][y * width + x] = z;
+						framebuffer->set(x, y, polygon.color);
+						// update the hierachy z-buffer
+						for (int i = _lod - 2; i >= 0; i--) {
+							int mip_x = x / (int)pow(2, _lod - (1 + i));
+							int mip_y = y / (int)pow(2, _lod - (1 + i));
+							auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
+							for (int j = 0; j < 4; j++) {
+								int sub_x = 2 * mip_x + j % 2;
+								int sub_y = 2 * mip_y + j / 2;
+								auto& z_in_sub = z_buffer[i + 1][sub_y * (int)pow(2, i + 1) + sub_x];
+								z_in_buffer = box_min(z_in_sub, z_in_buffer);
+							}
+						}
+					}
+				}
+				active_edge.xl += active_edge.dxl;
+				active_edge.xl = box_max(polygon.xl, active_edge.xl);
+				active_edge.xr += active_edge.dxr;
+				active_edge.xr = box_min(polygon.xr, active_edge.xr);
+				active_edge.zl += active_edge.dzx * active_edge.dxl + active_edge.dzy;
+
+				// update active edge
+				active_edge.dyl--;
+				active_edge.dyr--;
+
+				if (active_edge.dyl == 0 || active_edge.dyr == 0) {
+					auto new_edge = edgeEntries[2];
+					// dzx, dzy, zl and xl won't change
+					if (active_edge.dyl == 0) {
+						active_edge.dxl = new_edge.dx;
+						active_edge.dyl = new_edge.dy - 1;
+					}
+					else {
+						active_edge.dxr = new_edge.dx;
+						active_edge.dyr = new_edge.dy - 1;
+					}
+				}
+			}
+		}
+		stage.pop_back();
+		if (!node->_isLeaf) {
+			for (int i = 7; i >= 0; i--) {
+				stage.push_back(node->_subNodes[i]);
+			}
 		}
 	}
 	TIMING_END("Rasterization Done")

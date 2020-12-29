@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClInclude Include="geometry.h" />
     <ClInclude Include="objloader.hpp" />
+    <ClInclude Include="octree.h" />
     <ClInclude Include="rasterizer.h" />
     <ClInclude Include="scanlines.h" />
     <ClInclude Include="tgaimage.h" />
@@ -29,6 +30,7 @@
   <ItemGroup>
     <ClCompile Include="objloader.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="octree.cpp" />
     <ClCompile Include="rasterizer.cpp" />
     <ClCompile Include="tgaimage.cpp" />
   </ItemGroup>
