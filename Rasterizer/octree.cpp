@@ -7,9 +7,8 @@ Model* OctreeNode::_model = nullptr;
 std::vector<AABB> OctreeNode::_aabbs;
 
 OctreeNode::OctreeNode(const std::list<int>& faceIDs, const glm::vec3& center, float length, int depth) : 
-	_faceIDs(faceIDs), _center(center), _length(length)
+	_faceIDs(faceIDs), _center(center), _length(length), _isLeaf(true)
 {
-	_isLeaf = true;
 	if (_faceIDs.size() <= 2 || depth == MAX_DEPTH) {
 		return;
 	}
@@ -32,7 +31,7 @@ OctreeNode::OctreeNode(const std::list<int>& faceIDs, const glm::vec3& center, f
 		}
 	}
 
-	if (_isLeaf = false) {
+	if (!_isLeaf) {
 		auto signedLength = [this](bool positive) {
 			return positive ? _length / 4 : -_length / 4;
 		};
@@ -72,10 +71,13 @@ Octree::Octree(Model* model, OctreeZBuffer& rasterizer)
 		glm::vec3 min = glm::vec3(FLT_MAX);
 		for (int j = 0; j < 3; j++) {
 			glm::vec3 vtx = model->vertices[3 * i + j];
-			vtx = glm::vec3(rasterizer.ortho * rasterizer.view * glm::vec4(vtx, 1.0f));
-			vtx.x = (vtx.x + 1) * rasterizer.width / 2;
-			vtx.y = (vtx.y + 1) * rasterizer.height / 2;
-			rasterizer._verticesScreenspace.push_back(vtx);
+			//vtx = glm::vec3(rasterizer.ortho * rasterizer.view * glm::vec4(vtx, 1.0f));
+			//vtx.x = (vtx.x + 1) * rasterizer.width / 2;
+			//vtx.y = (vtx.y + 1) * rasterizer.height / 2;
+			//rasterizer._verticesScreenspace.push_back(vtx);
+
+			// do view transforamtion only
+			vtx = glm::vec3(rasterizer.view * glm::vec4(vtx, 1.0f));
 			max = glm::max(max, vtx);
 			min = glm::min(min, vtx);
 			model_max = glm::max(model_max, max);

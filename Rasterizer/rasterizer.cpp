@@ -10,14 +10,16 @@ Rasterizer::Rasterizer(int width, int height, const char* path) :
 	framebuffer = new TGAImage(width, height, TGAImage::RGB);
 	light_dir = glm::vec3(0.0f, 0.0f, 1.0f);
 	// the lookat matrix for cerberus
-	glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f);
+	//glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f); // lowe
+	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 eye = glm::vec3(0.0, 0.0, 3.0);
 	view = glm::lookAt(
 		eye,
 		eye + cameraFront,
 		glm::vec3(0.0, 1.0, 0.0) // up
 	);
-	ortho = glm::ortho(-1.2f, 0.7f, -1.0f, 1.0f);
+	//ortho = glm::ortho(-1.2f, 0.7f, -1.0f, 1.0f); // lowe
+	ortho = glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f);
 }
 
 Rasterizer::~Rasterizer() {
@@ -340,6 +342,7 @@ bool ScanLine::TraverseZBuffer(float targetZ, int mip_x, int mip_y, int lod, int
 
 #endif
 
+#if OCTREE
 OctreeZBuffer::OctreeZBuffer(int width, int height, const char* path) : 
 	ScanLine(width, height, path),
 	_octree(&model, *this){
@@ -353,21 +356,26 @@ void OctreeZBuffer::draw() {
 	// Traverse through the octree
 	std::list<OctreeNode*> stage;
 	stage.push_back(_octree.Root());
+	auto Proj = [this](glm::vec3 vtx) { return glm::vec3(ortho * glm::vec4(vtx, 1.0)); };
 	while (!stage.empty()) {
 		OctreeNode* node = stage.back();
 		// visibility test of the node
 		float halfLength = node->_length / 2;
-		if (!TraverseZBuffer(node->_center.z + halfLength, 0, 0, 0,
-			(int)(node->_center.x - halfLength),
-			(int)(node->_center.x + halfLength),
-			(int)(node->_center.y - halfLength),
-			(int)(node->_center.y + halfLength))) 
+		glm::vec3 center = node->_center;
+		auto FaceCoord = [this, &center, &halfLength, &Proj](int i) {
+			glm::vec3 offset(0.0);
+			int idx = i / 2;
+			offset[idx] = i % 2 ? halfLength : -halfLength;
+			auto coord = Proj(center + offset)[idx];
+			return idx == 2 ? coord : (coord + 1) * width / 2;
+		};
+		if (!TraverseZBuffer(FaceCoord(5), 0, 0, 0, FaceCoord(0), FaceCoord(1), FaceCoord(2), FaceCoord(3)))
 		{
 			continue;
 		}
 		// if there are triangles in this ndoe: rasterize it!
-		for (auto i : node->_faceIDs) {
-			glm::vec3 world_normal = model.normals[3 * i]; // every three vtxs share the same normal;
+		for (auto faceID : node->_faceIDs) {
+			glm::vec3 world_normal = model.normals[3 * faceID]; // every three vtxs share the same normal;
 			// for every vertices in the triangle
 			glm::vec3 vertices[3];
 			int y_map[3];
@@ -378,11 +386,12 @@ void OctreeZBuffer::draw() {
 			float z_max = -FLT_MAX;
 			for (int j = 0; j < 3; j++) {
 				// convert into screen space
-				//glm::vec3 vtx = model.vertices[3 * i + j];
-				//glm::vec2 vtx2d = (glm::vec2(vtx.x, vtx.y) / (1.5f * abs_max) + glm::vec2(1.0f)) * glm::vec2(width / 2, height / 2);
-				//vtx = glm::vec3(vtx2d.x, vtx2d.y, vtx.z);
+				glm::vec3 vtx = model.vertices[3 * faceID + j];
+				vtx = glm::vec3(ortho * view * glm::vec4(vtx, 1.0f));
+				vtx.x = (vtx.x + 1) * width / 2;
+				vtx.y = (vtx.y + 1) * height / 2;
 
-				glm::vec3 vtx = _verticesScreenspace[3 * i + j];
+				//glm::vec3 vtx = _verticesScreenspace[3 * i + j];
 				if (vtx.y > y_max) {
 					y_max = vtx.y;
 					y_map[0] = j;
@@ -395,6 +404,10 @@ void OctreeZBuffer::draw() {
 				x_min = box_min(vtx.x, x_min);
 				z_max = box_max(vtx.z, z_max);
 				vertices[j] = vtx;
+			}
+
+			if (y_max >= height || y_min < 0 || x_max >= width || x_min < 0) {
+				continue;
 			}
 
 			int polygon_dy = (int)y_max - (int)y_min + 1;
@@ -412,7 +425,7 @@ void OctreeZBuffer::draw() {
 			float intensity = box_max(glm::dot(world_normal, -light_dir), 0.0f);
 
 			glm::vec3 edges[3]; // raw data of edges are kept for computing screen-space normal
-			std::vector<EdgeEntry> edgeEntries(3); // Edge entries are kept for creating active edge entry
+			std::vector<EdgeEntry> edgeEntries; // Edge entries are kept for creating active edge entry
 			for (int m = 0; m < 2; m++) {
 				for (int n = m + 1; n < 3; n++) {
 					glm::vec3 vtx0 = vertices[y_map[m]];
@@ -421,7 +434,10 @@ void OctreeZBuffer::draw() {
 					edges[m + n - 1] = edge;
 
 					int edge_dy = (int)vtx0.y - (int)vtx1.y + 1;
-					if (edge_dy == 1 && m + n == 1) {
+					//if (edge_dy == 1 && m + n == 1) {
+					//	continue; // discard edges that covers only one row
+					//}
+					if (edge_dy == 1 || int(vtx0.y) < 0 || int(vtx0.y) >= height) {
 						continue; // discard edges that covers only one row
 					}
 
@@ -429,14 +445,16 @@ void OctreeZBuffer::draw() {
 						vtx0.x, //x of upper vertex
 						vtx0.z, // z of upper vertex
 						-(edge.x / edge.y), // dx (edge.y is negative)
-						i, // faceID
+						faceID, // faceID
 						edge_dy // dy, notice that the height of vtx0 must be greater than vtx1
 					};
-					if (int(vtx0.y) < 0 || int(vtx0.y) >= height) {
-						continue;
-					}
-					edgeEntries[m + n - 1] = edge_entry;
+					//edgeEntries[m+n-1] = edge_entry;
+					edgeEntries.push_back(edge_entry); 
 				}
+			}
+
+			if (edgeEntries.size() < 2) {
+				continue;
 			}
 
 			glm::vec3 screen_normal = glm::normalize(glm::cross(edges[0], edges[1]));
@@ -446,27 +464,38 @@ void OctreeZBuffer::draw() {
 
 			PolygonEntry polygon = {
 				screen_normal, // plane
-				i, //faceID
+				faceID, //faceID
 				polygon_dy, // dy
 				white * intensity, // color
 				//white, // debug purpose
-				//TGAColor(i * (255.0 / model.num_faces), 0, 0, 255),
+				//TGAColor(faceID * (255.0 / model.num_faces), 0, 0, 255),
 				//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255),
 				x_min, // xl
 				x_max, // xr
 				z_max // znear
 			};
 
+
+			if (edgeEntries.size() == 3) {
+				if ((edgeEntries[0].x_at_ymax == edgeEntries[1].x_at_ymax && edgeEntries[0].dx > edgeEntries[1].dx) || (edgeEntries[0].x_at_ymax > edgeEntries[1].x_at_ymax)) {
+					std::reverse(edgeEntries.begin(), edgeEntries.end());
+				}
+			}
+
 			ActiveEdgeEntry active_edge = {
 				edgeEntries[0].x_at_ymax, edgeEntries[0].dx, edgeEntries[0].dy,
 				edgeEntries[1].x_at_ymax, edgeEntries[1].dx, edgeEntries[1].dy,
 				edgeEntries[0].z_at_ymax, -polygon.plane.x / polygon.plane.z, polygon.plane.y / polygon.plane.z,
-				i
+				faceID
 			};
 
 			for (int y = y_max; y > y_max - polygon_dy; y--) {
 				// update pixels from left to right
 				for (int x = active_edge.xl + 0.5f; x <= active_edge.xr + 0.5f; x++) {
+
+					if (x == 119 && y == 768) {
+						int err = 1;
+					}
 					// update buffer contents
 					float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;	
 					if (z > z_buffer[_lod - 1][y * width + x]) {
@@ -495,6 +524,10 @@ void OctreeZBuffer::draw() {
 				// update active edge
 				active_edge.dyl--;
 				active_edge.dyr--;
+				
+				if (active_edge.dyl == 0 && active_edge.dyr == 0) {
+					break;
+				}
 
 				if (active_edge.dyl == 0 || active_edge.dyr == 0) {
 					auto new_edge = edgeEntries[2];
@@ -519,3 +552,5 @@ void OctreeZBuffer::draw() {
 	}
 	TIMING_END("Rasterization Done")
 }
+
+#endif
