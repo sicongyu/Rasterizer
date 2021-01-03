@@ -38,6 +38,8 @@ private:
 
 	float _length;
 
+	int _depth;
+
 	static Model* _model;
 
 	static std::vector<AABB> _aabbs;

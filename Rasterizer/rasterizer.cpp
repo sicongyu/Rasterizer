@@ -156,9 +156,9 @@ void ScanLine::draw() {
 			screen_normal, // plane
 			i, //faceID
 			polygon_dy, // dy
-			white * intensity, // color
+			//white * intensity, // color
 			//white, // debug purpose
-			//TGAColor(i * (255.0 / model.num_faces), 0, 0, 255),
+			TGAColor(i * (255.0 / model.num_faces), 255, 255, 255),
 			//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255),
 			x_min, // xl
 			x_max, // xr
@@ -269,8 +269,8 @@ void ScanLine::draw() {
 #endif // !HIERACHY_ZBUFFER
 
 				//debug
-				if (y == 308 && x == 395) {
-					int err = 0;
+				if (y == 525 && x == 496) {
+					int err = 0; // faceID = 508
 				}
 			}
 
@@ -331,11 +331,33 @@ bool ScanLine::TraverseZBuffer(float targetZ, int mip_x, int mip_y, int lod, int
 					sub_y < ymin / sub_node_length || sub_y > ymax / sub_node_length) {
 					continue;
 				}
-				if (TraverseZBuffer(targetZ, sub_x, sub_y, lod + 1, xmin, xmax, ymin, ymax)) {
-					return true;
+				if (!TraverseZBuffer(targetZ, sub_x, sub_y, lod + 1, xmin, xmax, ymin, ymax)) {
+					return false;
 				}
 			}
 		}
+	}
+	return true;
+}
+
+bool ScanLine::UpdateZBuffer(float z, int x, int y) {					
+	// update buffer contents
+	auto z_in_buffer_debug = z_buffer[_lod - 1][y * width + x];
+	if (z > z_buffer[_lod - 1][y * width + x]) {
+		z_buffer[_lod - 1][y * width + x] = z;
+		// update the hierachy z-buffer
+		for (int i = _lod - 2; i >= 0; i--) {
+			int mip_x = x / (int)pow(2, _lod - (1 + i));
+			int mip_y = y / (int)pow(2, _lod - (1 + i));
+			auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
+			for (int j = 0; j < 4; j++) {
+				int sub_x = 2 * mip_x + j % 2;
+				int sub_y = 2 * mip_y + j / 2;
+				auto& z_in_sub = z_buffer[i + 1][sub_y * (int)pow(2, i + 1) + sub_x];
+				z_in_buffer = box_min(z_in_sub, z_in_buffer);
+			}
+		}
+		return true;
 	}
 	return false;
 }
@@ -373,8 +395,25 @@ void OctreeZBuffer::draw() {
 		{
 			continue;
 		}
+#if VISUALIZE_OCTREE
+		if (node->_isLeaf && !node->_faceIDs.empty()) {
+			for (int y = FaceCoord(3); y >= FaceCoord(2); y--) {
+				for (int x = FaceCoord(0); x <= FaceCoord(1); x++) {
+					float z = FaceCoord(5);
+					if (UpdateZBuffer(z, x, y)) {
+						framebuffer->set(x, y, TGAColor(((float)node->_faceIDs.size() / 10) * 255, 255, 255, 255));
+					}
+				}
+			}
+
+		}
+#else
 		// if there are triangles in this ndoe: rasterize it!
 		for (auto faceID : node->_faceIDs) {
+
+			if (faceID == 508) {
+				int err = 1;
+			}
 			glm::vec3 world_normal = model.normals[3 * faceID]; // every three vtxs share the same normal;
 			// for every vertices in the triangle
 			glm::vec3 vertices[3];
@@ -466,9 +505,9 @@ void OctreeZBuffer::draw() {
 				screen_normal, // plane
 				faceID, //faceID
 				polygon_dy, // dy
-				white * intensity, // color
+				//white * intensity, // color
 				//white, // debug purpose
-				//TGAColor(faceID * (255.0 / model.num_faces), 0, 0, 255),
+				TGAColor(255, faceID >> 8, faceID, 255),
 				//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255),
 				x_min, // xl
 				x_max, // xr
@@ -476,7 +515,7 @@ void OctreeZBuffer::draw() {
 			};
 
 
-			if (edgeEntries.size() == 3) {
+			if (edgeEntries.size() <= 2) {
 				if ((edgeEntries[0].x_at_ymax == edgeEntries[1].x_at_ymax && edgeEntries[0].dx > edgeEntries[1].dx) || (edgeEntries[0].x_at_ymax > edgeEntries[1].x_at_ymax)) {
 					std::reverse(edgeEntries.begin(), edgeEntries.end());
 				}
@@ -493,26 +532,13 @@ void OctreeZBuffer::draw() {
 				// update pixels from left to right
 				for (int x = active_edge.xl + 0.5f; x <= active_edge.xr + 0.5f; x++) {
 
-					if (x == 119 && y == 768) {
-						int err = 1;
+					if (x == 432 && y == 552) {
+						int err = 1; // 437, 622 - ID: 481; 437, 527, ID: 485
 					}
 					// update buffer contents
 					float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;	
-					if (z > z_buffer[_lod - 1][y * width + x]) {
-						z_buffer[_lod - 1][y * width + x] = z;
+					if (UpdateZBuffer(z, x, y)) {
 						framebuffer->set(x, y, polygon.color);
-						// update the hierachy z-buffer
-						for (int i = _lod - 2; i >= 0; i--) {
-							int mip_x = x / (int)pow(2, _lod - (1 + i));
-							int mip_y = y / (int)pow(2, _lod - (1 + i));
-							auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
-							for (int j = 0; j < 4; j++) {
-								int sub_x = 2 * mip_x + j % 2;
-								int sub_y = 2 * mip_y + j / 2;
-								auto& z_in_sub = z_buffer[i + 1][sub_y * (int)pow(2, i + 1) + sub_x];
-								z_in_buffer = box_min(z_in_sub, z_in_buffer);
-							}
-						}
 					}
 				}
 				active_edge.xl += active_edge.dxl;
@@ -543,9 +569,10 @@ void OctreeZBuffer::draw() {
 				}
 			}
 		}
+#endif // VISUALIZE_OCTREE
 		stage.pop_back();
 		if (!node->_isLeaf) {
-			for (int i = 7; i >= 0; i--) {
+			for (int i = 0; i < 8; i++) {
 				stage.push_back(node->_subNodes[i]);
 			}
 		}
@@ -553,4 +580,4 @@ void OctreeZBuffer::draw() {
 	TIMING_END("Rasterization Done")
 }
 
-#endif
+#endif // OCTREE

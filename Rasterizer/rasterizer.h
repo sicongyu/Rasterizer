@@ -10,6 +10,7 @@
 
 #define HIERACHY_ZBUFFER 1
 #define OCTREE 1
+#define VISUALIZE_OCTREE 0
 
 class Rasterizer{
 
@@ -58,6 +59,8 @@ protected:
 	int _lod;
 
 	bool TraverseZBuffer(float targetZ, int mip_x, int mip_y, int lod, int xmin, int xmax, int ymin, int ymax);
+
+	bool UpdateZBuffer(float z, int x, int y);
 #else
 	float* z_buffer;
 #endif
