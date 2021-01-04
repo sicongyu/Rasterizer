@@ -1,5 +1,6 @@
 #include "octree.h"
 #include "rasterizer.h"
+#include "timer.h"
 #include <numeric>
 
 Model* OctreeNode::_model = nullptr;
@@ -26,8 +27,8 @@ OctreeNode::OctreeNode(const std::list<int>& faceIDs, const glm::vec3& center, f
 		}
 
 		if (bitmap(aabb.min) == (map = bitmap(aabb.max))) {
-			// 5, 7; 1, 3; 
-			// 4, 6; 0, 2; 
+			// 1, 3; 5, 7; 
+			// 0, 2; 4, 6; 
 			subLists[map].push_back(*iter);
 			iter = _faceIDs.erase(iter);
 			_isLeaf = false;
@@ -41,14 +42,14 @@ OctreeNode::OctreeNode(const std::list<int>& faceIDs, const glm::vec3& center, f
 		auto signedLength = [this](bool positive) {
 			return positive ? _length / 4 : -_length / 4;
 		};
-		auto center = [this, signedLength] (int map) {
+		auto Center = [this, signedLength] (int map) {
 			return glm::vec3(
 				_center.x + signedLength((map & 0x4) >> 2),
 				_center.y + signedLength((map & 0x2) >> 1),
 				_center.z + signedLength(map & 0x1)); 
 		};
 		for (int i = 0; i < 8; i++) {
-			_subNodes[i] = new OctreeNode(subLists[i], center(i), _length / 2, depth + 1);
+			_subNodes[i] = new OctreeNode(subLists[i], Center(i), _length / 2, depth + 1);
 		}
 	}
 }
@@ -65,6 +66,7 @@ OctreeNode::~OctreeNode()
 
 Octree::Octree(Model* model, OctreeZBuffer& rasterizer)
 {
+	TIMING_BEGIN("Start Octree Building")
 	std::list<int> faceIDs(model->num_faces);
 	std::iota(std::begin(faceIDs), std::end(faceIDs), 0);
 	// do view/proj transformation for all vertices HERE
@@ -94,6 +96,7 @@ Octree::Octree(Model* model, OctreeZBuffer& rasterizer)
 	float length = box_max(model_max.x - model_min.x, box_max(model_max.y - model_min.y, model_max.z - model_min.z));
 	_root = new OctreeNode(faceIDs, (model_max + model_min) / 2.0f, length, 1);
 	OctreeNode::_model = model;
+	TIMING_END("Octree Building Done")
 }
 
 Octree::~Octree()

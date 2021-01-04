@@ -8,8 +8,8 @@
 #include <vector>
 #include <unordered_map>
 
-#define HIERACHY_ZBUFFER 1
-#define OCTREE 1
+#define HIERACHY_ZBUFFER 0
+#define OCTREE 0
 #define VISUALIZE_OCTREE 0
 
 class Rasterizer{
@@ -54,7 +54,7 @@ public:
 
 protected:
 #if HIERACHY_ZBUFFER || OCTREE
-	float** z_buffer;
+	std::vector<std::vector<float>> z_buffer;
 
 	int _lod;
 

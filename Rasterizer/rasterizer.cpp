@@ -10,16 +10,16 @@ Rasterizer::Rasterizer(int width, int height, const char* path) :
 	framebuffer = new TGAImage(width, height, TGAImage::RGB);
 	light_dir = glm::vec3(0.0f, 0.0f, 1.0f);
 	// the lookat matrix for cerberus
-	//glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f); // lowe
-	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
+	glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f); // lowe
+	//glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 eye = glm::vec3(0.0, 0.0, 3.0);
 	view = glm::lookAt(
 		eye,
 		eye + cameraFront,
 		glm::vec3(0.0, 1.0, 0.0) // up
 	);
-	//ortho = glm::ortho(-1.2f, 0.7f, -1.0f, 1.0f); // lowe
-	ortho = glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f);
+	ortho = glm::ortho(-1.2f, 0.7f, -1.0f, 1.0f); // lowe
+	//ortho = glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, 0.1f, 5.0f);
 }
 
 Rasterizer::~Rasterizer() {
@@ -36,11 +36,13 @@ ScanLine::ScanLine(int width, int height, const char* path) :
 #else
 	// Hierachy z-buffer: the smaller lod is, the blurer the picture
 	_lod = log2(width) + 1; // Assume height == width
-	z_buffer = new float*[_lod];
+	z_buffer = std::vector<std::vector<float>>(_lod);
 	for (int i = 0; i < _lod; i++) {
 		int buffer_length = pow(4, i);
-		z_buffer[i] = new float[buffer_length];
-		std::fill_n(z_buffer[i], buffer_length, -FLT_MAX);
+		//z_buffer[i].resize(buffer_length);
+		z_buffer[i] = std::vector<float>(buffer_length, -FLT_MAX);
+		//z_buffer[i] = new float[buffer_length];
+		//std::fill_n(z_buffer[i], buffer_length, -FLT_MAX);
 	}
 #endif
 }
@@ -49,10 +51,10 @@ ScanLine::~ScanLine() {
 #if !HIERACHY_ZBUFFER
 	delete[] z_buffer;
 #else
-	for (int i = 0; i < _lod; i++) {
-		delete[] z_buffer[i];
-	}
-	delete[] z_buffer;
+	//for (int i = 0; i < _lod; i++) {
+	//	delete[] z_buffer[i];
+	//}
+	//delete[] z_buffer;
 #endif // !HIERACHY_ZBUFFER
 
 }
@@ -156,9 +158,9 @@ void ScanLine::draw() {
 			screen_normal, // plane
 			i, //faceID
 			polygon_dy, // dy
-			//white * intensity, // color
+			white * intensity, // color
 			//white, // debug purpose
-			TGAColor(i * (255.0 / model.num_faces), 255, 255, 255),
+			//TGAColor(255, i >> 8, i, 255),
 			//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255),
 			x_min, // xl
 			x_max, // xr
@@ -191,10 +193,6 @@ void ScanLine::draw() {
 				// add entries to active polygon table
 				//active_polygon_table.push_back(polygon);
 				active_polygon_table.emplace(faceID, polygon);
-				
-				if (faceID == 4092) {
-					int err = 0;
-				}
 
 				// serach for corresponding edges of the polygon: there must to be at least two edges, and we do not consider the three-edge case
 				std::vector<EdgeEntry> edges;
@@ -236,13 +234,12 @@ void ScanLine::draw() {
 			auto& active_edge = active_edge_pair_iter->second;
 			auto& active_polygon = active_polygon_table[active_edge_pair_iter->first];
 
-			if (active_edge.faceID == 4092) {
-				int err = 0;
-			}
-
 			// update pixels from left to right
 			for (int x = active_edge.xl + 0.5f; x <= active_edge.xr + 0.5f; x++) {
 				// update buffer contents
+				if (x < 0 || x >= width) {
+					continue;
+				}
 				float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;
 #if !HIERACHY_ZBUFFER
 				if (z > z_buffer[y * width + x]) {
@@ -250,28 +247,26 @@ void ScanLine::draw() {
 					framebuffer->set(x, y, active_polygon.color);
 				}
 #else			
-				if (z > z_buffer[_lod - 1][y * width + x]) {
-					z_buffer[_lod - 1][y * width + x] = z;
+				if (UpdateZBuffer(z, x, y)) {
 					framebuffer->set(x, y, active_polygon.color);
-					// update the hierachy z-buffer
-					for (int i = _lod - 2; i >= 0; i--) {
-						int mip_x = x / (int)pow(2, _lod - (1 + i));
-						int mip_y = y / (int)pow(2, _lod - (1 + i));
-						auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
-						for (int j = 0; j < 4; j++) {
-							int sub_x = 2 * mip_x + j % 2;
-							int sub_y = 2 * mip_y + j / 2;
-							auto& z_in_sub = z_buffer[i + 1][sub_y * (int)pow(2, i + 1) + sub_x];
-							z_in_buffer = box_min(z_in_sub, z_in_buffer);
-						}
-					}
 				}
+				//if (z > z_buffer[_lod - 1][y * width + x]) {
+				//	z_buffer[_lod - 1][y * width + x] = z;
+				//	framebuffer->set(x, y, active_polygon.color);
+				//	// update the hierachy z-buffer
+				//	for (int i = _lod - 2; i >= 0; i--) {
+				//		int mip_x = x / (int)pow(2, _lod - (1 + i));
+				//		int mip_y = y / (int)pow(2, _lod - (1 + i));
+				//		auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
+				//		for (int j = 0; j < 4; j++) {
+				//			int sub_x = 2 * mip_x + j % 2;
+				//			int sub_y = 2 * mip_y + j / 2;
+				//			auto& z_in_sub = z_buffer[i + 1][sub_y * (int)pow(2, i + 1) + sub_x];
+				//			z_in_buffer = box_min(z_in_sub, z_in_buffer);
+				//		}
+				//	}
+				//}
 #endif // !HIERACHY_ZBUFFER
-
-				//debug
-				if (y == 525 && x == 496) {
-					int err = 0; // faceID = 508
-				}
 			}
 
 			{
@@ -349,13 +344,15 @@ bool ScanLine::UpdateZBuffer(float z, int x, int y) {
 		for (int i = _lod - 2; i >= 0; i--) {
 			int mip_x = x / (int)pow(2, _lod - (1 + i));
 			int mip_y = y / (int)pow(2, _lod - (1 + i));
-			auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
+			//auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
+			float sub_zmin = FLT_MAX;
 			for (int j = 0; j < 4; j++) {
 				int sub_x = 2 * mip_x + j % 2;
 				int sub_y = 2 * mip_y + j / 2;
 				auto& z_in_sub = z_buffer[i + 1][sub_y * (int)pow(2, i + 1) + sub_x];
-				z_in_buffer = box_min(z_in_sub, z_in_buffer);
+				sub_zmin = box_min(sub_zmin, z_in_sub);
 			}
+			z_buffer[i][mip_y * (int)pow(2, i) + mip_x] = sub_zmin;
 		}
 		return true;
 	}
@@ -391,7 +388,12 @@ void OctreeZBuffer::draw() {
 			auto coord = Proj(center + offset)[idx];
 			return idx == 2 ? coord : (coord + 1) * width / 2;
 		};
-		if (!TraverseZBuffer(FaceCoord(5), 0, 0, 0, FaceCoord(0), FaceCoord(1), FaceCoord(2), FaceCoord(3)))
+		auto xmin = FaceCoord(0);
+		auto xmax = FaceCoord(1);
+		auto ymin = FaceCoord(2);
+		auto ymax = FaceCoord(3);
+		auto znear = FaceCoord(4);
+		if (!TraverseZBuffer(znear, 0, 0, 0, xmin, xmax, ymin, ymax))
 		{
 			continue;
 		}
@@ -410,10 +412,6 @@ void OctreeZBuffer::draw() {
 #else
 		// if there are triangles in this ndoe: rasterize it!
 		for (auto faceID : node->_faceIDs) {
-
-			if (faceID == 508) {
-				int err = 1;
-			}
 			glm::vec3 world_normal = model.normals[3 * faceID]; // every three vtxs share the same normal;
 			// for every vertices in the triangle
 			glm::vec3 vertices[3];
@@ -505,9 +503,9 @@ void OctreeZBuffer::draw() {
 				screen_normal, // plane
 				faceID, //faceID
 				polygon_dy, // dy
-				//white * intensity, // color
+				white * intensity, // color
 				//white, // debug purpose
-				TGAColor(255, faceID >> 8, faceID, 255),
+				//TGAColor(255, faceID >> 8, faceID, 255),
 				//TGAColor(255 * world_normal.x, 255 * world_normal.y, 255 * world_normal.z, 255),
 				x_min, // xl
 				x_max, // xr
@@ -515,9 +513,10 @@ void OctreeZBuffer::draw() {
 			};
 
 
-			if (edgeEntries.size() <= 2) {
+			if (edgeEntries.size() <= 3) {
 				if ((edgeEntries[0].x_at_ymax == edgeEntries[1].x_at_ymax && edgeEntries[0].dx > edgeEntries[1].dx) || (edgeEntries[0].x_at_ymax > edgeEntries[1].x_at_ymax)) {
-					std::reverse(edgeEntries.begin(), edgeEntries.end());
+					//std::reverse(edgeEntries.begin(), edgeEntries.end());
+					std::swap(edgeEntries[0], edgeEntries[1]);
 				}
 			}
 
@@ -531,9 +530,8 @@ void OctreeZBuffer::draw() {
 			for (int y = y_max; y > y_max - polygon_dy; y--) {
 				// update pixels from left to right
 				for (int x = active_edge.xl + 0.5f; x <= active_edge.xr + 0.5f; x++) {
-
-					if (x == 432 && y == 552) {
-						int err = 1; // 437, 622 - ID: 481; 437, 527, ID: 485
+					if (x < 0 || x >= width) {
+						continue;
 					}
 					// update buffer contents
 					float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;	
@@ -572,7 +570,7 @@ void OctreeZBuffer::draw() {
 #endif // VISUALIZE_OCTREE
 		stage.pop_back();
 		if (!node->_isLeaf) {
-			for (int i = 0; i < 8; i++) {
+			for (int i = 7; i >= 0; i--) {
 				stage.push_back(node->_subNodes[i]);
 			}
 		}
