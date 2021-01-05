@@ -40,6 +40,8 @@ private:
 
 	int _depth;
 
+	int _debugID;
+
 	static Model* _model;
 
 	static std::vector<AABB> _aabbs;

@@ -10,15 +10,15 @@ Rasterizer::Rasterizer(int width, int height, const char* path) :
 	framebuffer = new TGAImage(width, height, TGAImage::RGB);
 	light_dir = glm::vec3(0.0f, 0.0f, 1.0f);
 	// the lookat matrix for cerberus
-	glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f); // lowe
-	//glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
+	//glm::vec3 cameraFront = glm::vec3(0.2f, 0.0f, -1.0f); // lowe
+	glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 eye = glm::vec3(0.0, 0.0, 3.0);
 	view = glm::lookAt(
 		eye,
 		eye + cameraFront,
 		glm::vec3(0.0, 1.0, 0.0) // up
 	);
-	ortho = glm::ortho(-1.2f, 0.7f, -1.0f, 1.0f); // lowe
+	ortho = glm::ortho(-0.7f, 1.3f, -1.0f, 1.0f); // lowe
 	//ortho = glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, 0.1f, 5.0f);
 }
 
@@ -185,7 +185,10 @@ void ScanLine::draw() {
 
 #if HIERACHY_ZBUFFER
 				// do znear check before rasterization a polygon
-				if (!TraverseZBuffer(polygon.znear, 0, 0, 0, polygon.xl, polygon.xr, y - polygon.dy, y)) {
+				//if (!TraverseZBuffer(polygon.znear, 0, 0, 0, polygon.xl, polygon.xr, y - polygon.dy, y)) {
+				//	continue;
+				//}
+				if (!TraverseZBuffer(polygon.znear, polygon.xl, polygon.xr, y - polygon.dy, y)) {
 					continue;
 				}
 #endif // HIERACHY_ZBUFFER
@@ -234,12 +237,11 @@ void ScanLine::draw() {
 			auto& active_edge = active_edge_pair_iter->second;
 			auto& active_polygon = active_polygon_table[active_edge_pair_iter->first];
 
+			int xmin = box_max(0, (int)active_edge.xl + 0.5f);
+			int xmax = box_min(width - 1, (int)active_edge.xr + 0.5f);
+
 			// update pixels from left to right
-			for (int x = active_edge.xl + 0.5f; x <= active_edge.xr + 0.5f; x++) {
-				// update buffer contents
-				if (x < 0 || x >= width) {
-					continue;
-				}
+			for (int x = xmin; x <= xmax + 0.5f; x++) {
 				float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;
 #if !HIERACHY_ZBUFFER
 				if (z > z_buffer[y * width + x]) {
@@ -335,6 +337,33 @@ bool ScanLine::TraverseZBuffer(float targetZ, int mip_x, int mip_y, int lod, int
 	return true;
 }
 
+bool ScanLine::TraverseZBuffer(float targetZ, int xmin, int xmax, int ymin, int ymax) {
+	if (xmin >= width || xmax < 0 || ymin >= height || ymax < 0) {
+		return false;
+	}
+	int length = box_max(xmax - xmin, ymax - ymin);
+	int numHierarchy = box_min(log2(length) + 1, _lod - 1);
+	int lod = _lod - numHierarchy - 1;
+	int node_length = 1 << numHierarchy; // node_length = pow(2, lod - 1)
+	int row_width = 1 << lod;
+	xmin = box_max(0, xmin);
+	xmax = box_min(width - 1, xmax);
+	ymin = box_max(0, ymin);
+	ymax = box_min(height - 1, ymax);
+	int xmin_mip = xmin / node_length;
+	int xmax_mip = xmax / node_length;
+	int ymin_mip = ymin / node_length;
+	int ymax_mip = ymax / node_length;
+	for (int y = ymin_mip; y <= ymax_mip; y++) {
+		for (int x = xmin_mip; x <= xmax_mip; x++) {
+			if (TraverseZBuffer(targetZ, x, y, lod, xmin, xmax, ymin, ymax)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 bool ScanLine::UpdateZBuffer(float z, int x, int y) {					
 	// update buffer contents
 	auto z_in_buffer_debug = z_buffer[_lod - 1][y * width + x];
@@ -342,6 +371,33 @@ bool ScanLine::UpdateZBuffer(float z, int x, int y) {
 		z_buffer[_lod - 1][y * width + x] = z;
 		// update the hierachy z-buffer
 		for (int i = _lod - 2; i >= 0; i--) {
+			int mip_x = x / (int)pow(2, _lod - (1 + i));
+			int mip_y = y / (int)pow(2, _lod - (1 + i));
+			//auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
+			float sub_zmin = FLT_MAX;
+			for (int j = 0; j < 4; j++) {
+				int sub_x = 2 * mip_x + j % 2;
+				int sub_y = 2 * mip_y + j / 2;
+				auto& z_in_sub = z_buffer[i + 1][sub_y * (int)pow(2, i + 1) + sub_x];
+				sub_zmin = box_min(sub_zmin, z_in_sub);
+			}
+			z_buffer[i][mip_y * (int)pow(2, i) + mip_x] = sub_zmin;
+			if (sub_zmin != z) {
+				break;
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
+bool ScanLine::UpdateZBuffer(float z, int numHierarchy, int x, int y) {
+	// update buffer contents
+	auto z_in_buffer_debug = z_buffer[_lod - 1][y * width + x];
+	if (z > z_buffer[_lod - 1][y * width + x]) {
+		z_buffer[_lod - 1][y * width + x] = z;
+		// update the hierachy z-buffer
+		for (int i = _lod - 2; i >= _lod - numHierarchy; i--) {
 			int mip_x = x / (int)pow(2, _lod - (1 + i));
 			int mip_y = y / (int)pow(2, _lod - (1 + i));
 			//auto& z_in_buffer = z_buffer[i][mip_y * (int)pow(2, i) + mip_x];
@@ -378,6 +434,7 @@ void OctreeZBuffer::draw() {
 	auto Proj = [this](glm::vec3 vtx) { return glm::vec3(ortho * glm::vec4(vtx, 1.0)); };
 	while (!stage.empty()) {
 		OctreeNode* node = stage.back();
+		stage.pop_back();
 		// visibility test of the node
 		float halfLength = node->_length / 2;
 		glm::vec3 center = node->_center;
@@ -393,7 +450,8 @@ void OctreeZBuffer::draw() {
 		auto ymin = FaceCoord(2);
 		auto ymax = FaceCoord(3);
 		auto znear = FaceCoord(4);
-		if (!TraverseZBuffer(znear, 0, 0, 0, xmin, xmax, ymin, ymax))
+
+		if (!TraverseZBuffer(znear, xmin, xmax, ymin, ymax))
 		{
 			continue;
 		}
@@ -443,7 +501,7 @@ void OctreeZBuffer::draw() {
 				vertices[j] = vtx;
 			}
 
-			if (y_max >= height || y_min < 0 || x_max >= width || x_min < 0) {
+			if (y_min >= height || y_max < 0 || x_min >= width || x_max < 0) {
 				continue;
 			}
 
@@ -474,7 +532,7 @@ void OctreeZBuffer::draw() {
 					//if (edge_dy == 1 && m + n == 1) {
 					//	continue; // discard edges that covers only one row
 					//}
-					if (edge_dy == 1 || int(vtx0.y) < 0 || int(vtx0.y) >= height) {
+					if (edge_dy == 1) {
 						continue; // discard edges that covers only one row
 					}
 
@@ -528,15 +586,16 @@ void OctreeZBuffer::draw() {
 			};
 
 			for (int y = y_max; y > y_max - polygon_dy; y--) {
-				// update pixels from left to right
-				for (int x = active_edge.xl + 0.5f; x <= active_edge.xr + 0.5f; x++) {
-					if (x < 0 || x >= width) {
-						continue;
-					}
-					// update buffer contents
-					float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;	
-					if (UpdateZBuffer(z, x, y)) {
-						framebuffer->set(x, y, polygon.color);
+				if (y >= 0 && y < height) {
+					// update pixels from left to right
+					int xmin = box_max(0, (int)active_edge.xl + 0.5f);
+					int xmax = box_min(width - 1, (int)active_edge.xr + 0.5f);
+					for (int x = xmin; x <= xmax; x++) {
+						// update buffer contents
+						float z = active_edge.zl + (x - active_edge.xl) * active_edge.dzx;
+						if (UpdateZBuffer(z, x, y)) {
+							framebuffer->set(x, y, polygon.color);
+						}
 					}
 				}
 				active_edge.xl += active_edge.dxl;
@@ -568,9 +627,9 @@ void OctreeZBuffer::draw() {
 			}
 		}
 #endif // VISUALIZE_OCTREE
-		stage.pop_back();
 		if (!node->_isLeaf) {
 			for (int i = 7; i >= 0; i--) {
+			//for (int i = 0; i < 8; i++) {
 				stage.push_back(node->_subNodes[i]);
 			}
 		}

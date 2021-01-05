@@ -10,7 +10,8 @@ std::vector<AABB> OctreeNode::_aabbs;
 OctreeNode::OctreeNode(const std::list<int>& faceIDs, const glm::vec3& center, float length, int depth) : 
 	_faceIDs(faceIDs), _center(center), _length(length), _isLeaf(true), _depth(depth)
 {
-	if (_faceIDs.size() <= 2 || depth == MAX_DEPTH) {
+	_debugID = (depth << 24) + ((int)abs(_center.x * 100) << 16) + ((int)abs(_center.y * 100) << 8) + (int)abs(_center.z * 100);
+	if (_faceIDs.size() <= 5 || depth == MAX_DEPTH) {
 		return;
 	}
 
@@ -18,17 +19,13 @@ OctreeNode::OctreeNode(const std::list<int>& faceIDs, const glm::vec3& center, f
 	for (auto iter = _faceIDs.begin(); iter != _faceIDs.end();) {
 
 		auto aabb = this->_aabbs[*iter];
-		auto bitmap = [this](glm::vec3 corner) { return (0x4 & (corner.x > _center.x) << 2) | (0x2 & (corner.y > _center.y) << 1) | (0x1 & (corner.z > _center.z)); }; // 0 - negative 1 - positive
+		auto bitmap = [this](glm::vec3 corner) { return (0x4 & (corner.z > _center.z) << 2) | (0x2 & (corner.y > _center.y) << 1) | (0x1 & (corner.x > _center.x)); }; // 0 - negative 1 - positive
 		// bounding box doesn't intersect with any partition plane
 		int map;
 
-		if (*iter == 508) {
-			int err = 1;
-		}
-
 		if (bitmap(aabb.min) == (map = bitmap(aabb.max))) {
-			// 1, 3; 5, 7; 
-			// 0, 2; 4, 6; 
+			// 2, 3; 6, 7; 
+			// 0, 1; 4, 5; 
 			subLists[map].push_back(*iter);
 			iter = _faceIDs.erase(iter);
 			_isLeaf = false;
@@ -44,9 +41,9 @@ OctreeNode::OctreeNode(const std::list<int>& faceIDs, const glm::vec3& center, f
 		};
 		auto Center = [this, signedLength] (int map) {
 			return glm::vec3(
-				_center.x + signedLength((map & 0x4) >> 2),
+				_center.x + signedLength(map & 0x1),
 				_center.y + signedLength((map & 0x2) >> 1),
-				_center.z + signedLength(map & 0x1)); 
+				_center.z + signedLength((map & 0x4) >> 2));
 		};
 		for (int i = 0; i < 8; i++) {
 			_subNodes[i] = new OctreeNode(subLists[i], Center(i), _length / 2, depth + 1);

@@ -8,9 +8,13 @@
 #include <vector>
 #include <unordered_map>
 
-#define HIERACHY_ZBUFFER 0
-#define OCTREE 0
+#define HIERACHY_ZBUFFER 1
+#define OCTREE 1
 #define VISUALIZE_OCTREE 0
+
+#if HIERACHY_ZBUFFER
+#define NUM_HIERARCHY 4
+#endif
 
 class Rasterizer{
 
@@ -60,7 +64,11 @@ protected:
 
 	bool TraverseZBuffer(float targetZ, int mip_x, int mip_y, int lod, int xmin, int xmax, int ymin, int ymax);
 
+	bool TraverseZBuffer(float targetZ, int xmin, int xmax, int ymin, int ymax);
+
 	bool UpdateZBuffer(float z, int x, int y);
+
+	bool UpdateZBuffer(float z, int numHierarchy, int x, int y);
 #else
 	float* z_buffer;
 #endif
